@@ -15,7 +15,7 @@ import { pendingNotices } from './notify.js';
 import { limit } from './plan.js';
 import * as ui from './ui.js';
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const STORAGE_LABELS = {
   indexeddb: 'この端末（IndexedDB）',
   localstorage: 'この端末（localStorage）',
@@ -36,16 +36,17 @@ let pendingDraft = null;
 
 // 実戦カウンターの状態。打っている途中で画面が閉じても消えないよう、端末内に残す
 const JUDGE_KEY = 'medalbank:judge';
-const COUNT_KEYS = ['bb', 'rb', 'rbSolo', 'rbCherry', 'grape', 'cherry'];
+const COUNT_KEYS = ['bb', 'bbSolo', 'bbCherry', 'rb', 'rbSolo', 'rbCherry', 'grape', 'cherry'];
 let judgeState = loadJudgeState();
 
 function loadJudgeState() {
-  const base = { machineId: 'im-ex', storeId: null, games: '', today: '', splitRb: false, countSmall: false, result: null };
+  const base = { machineId: 'im-ex', storeId: null, games: '', today: '', splitBb: false, splitRb: false, countSmall: true, optsOpen: false, history: [], minusMode: false, result: null };
   for (const k of COUNT_KEYS) base[k] = 0;
   try {
     const saved = JSON.parse(localStorage.getItem(JUDGE_KEY) ?? 'null');
     if (saved && typeof saved === 'object') {
-      for (const k of Object.keys(base)) if (k !== 'result' && saved[k] !== undefined) base[k] = saved[k];
+      for (const k of Object.keys(base)) if (k !== 'result' && k !== 'minusMode' && saved[k] !== undefined) base[k] = saved[k];
+      if (!Array.isArray(base.history)) base.history = [];
     }
   } catch { /* 保存できない環境ではメモリだけで動かす */ }
   return base;
@@ -53,7 +54,7 @@ function loadJudgeState() {
 
 function saveJudgeState() {
   try {
-    localStorage.setItem(JUDGE_KEY, JSON.stringify({ ...judgeState, result: undefined }));
+    localStorage.setItem(JUDGE_KEY, JSON.stringify({ ...judgeState, result: undefined, minusMode: undefined, history: judgeState.history.slice(-100) }));
   } catch { /* 同上 */ }
 }
 
@@ -227,7 +228,7 @@ function computeJudge() {
   }
   const s = data.settings;
   const store = data.store(js.storeId);
-  const counts = { games, splitRb: js.splitRb, countSmall: js.countSmall };
+  const counts = { games, splitBb: js.splitBb, splitRb: js.splitRb, countSmall: js.countSmall };
   for (const k of COUNT_KEYS) counts[k] = Number(js[k]) || 0;
   js.result = judge({
     machine: machineList().find((m) => m.id === js.machineId) ?? null,
@@ -256,6 +257,8 @@ function refreshJudge() {
   }
   const stats = document.getElementById('jd-stats');
   if (stats) stats.innerHTML = ui.counterStats(judgeState);
+  const undo = main.querySelector('[data-action="count-undo"]');
+  if (undo) undo.disabled = !judgeState.history.length;
   const res = document.getElementById('judge-result');
   if (res) res.innerHTML = ui.judgeResult(vm, judgeState);
 }
@@ -377,13 +380,35 @@ const actions = {
   'diag-range': (el) => { diagState.range = el.dataset.id; render(); },
   count: (el) => {
     const k = el.dataset.key;
-    judgeState[k] = Math.max(0, (Number(judgeState[k]) || 0) + Number(el.dataset.d));
+    const before = Number(judgeState[k]) || 0;
+    const d = judgeState.minusMode ? -1 : 1;
+    if (before + d < 0) return;
+    judgeState[k] = before + d;
+    judgeState.history.push([k, d]);
+    navigator.vibrate?.(judgeState.minusMode ? [8, 40, 8] : 10);
+    // 押した感触：数字を一瞬はずませる
+    el.classList.remove('bump');
+    void el.offsetWidth;
+    el.classList.add('bump');
+    refreshJudge();
+  },
+  'count-undo': () => {
+    const last = judgeState.history.pop();
+    if (!last) return;
+    const [k, d] = last;
+    judgeState[k] = Math.max(0, (Number(judgeState[k]) || 0) - d);
     navigator.vibrate?.(8);
     refreshJudge();
+  },
+  'minus-mode': () => {
+    judgeState.minusMode = !judgeState.minusMode;
+    render();
   },
   'count-reset': () => {
     if (!confirm('G数とカウントをリセットしますか？')) return;
     for (const k of COUNT_KEYS) judgeState[k] = 0;
+    judgeState.history = [];
+    judgeState.minusMode = false;
     judgeState.games = '';
     judgeState.today = '';
     saveJudgeState();
@@ -391,13 +416,15 @@ const actions = {
   },
   'judge-record': () => {
     const machine = machineList().find((m) => m.id === judgeState.machineId);
-    const rb = judgeState.splitRb ? `REG ${judgeState.rbSolo + judgeState.rbCherry}（単独${judgeState.rbSolo}・チェリー${judgeState.rbCherry}）` : `REG ${judgeState.rb}`;
+    const js = judgeState;
+    const bb = js.splitBb ? `BIG ${js.bbSolo + js.bbCherry}（単独${js.bbSolo}・チェリー${js.bbCherry}）` : `BIG ${js.bb}`;
+    const rb = js.splitRb ? `REG ${js.rbSolo + js.rbCherry}（単独${js.rbSolo}・チェリー${js.rbCherry}）` : `REG ${js.rb}`;
     pendingDraft = {
       storeId: judgeState.storeId,
       machine: machine?.name ?? '',
       machineType: machine ? 'a' : '',
       games: judgeState.games,
-      memo: `BIG ${judgeState.bb}・${rb}${judgeState.countSmall ? `・ブドウ ${judgeState.grape}・チェリー ${judgeState.cherry}` : ''}`,
+      memo: `${bb}・${rb}${judgeState.countSmall && (judgeState.grape || judgeState.cherry) ? `・ブドウ ${judgeState.grape}・チェリー ${judgeState.cherry}` : ''}`,
       detailOpen: true,
     };
     go('#/record');
@@ -543,7 +570,30 @@ async function onChange(e) {
         const v = t.name === 'dailyLossLimit' ? (t.value === '' ? 0 : Number(t.value)) : t.value;
         await data.updateSettings({ [t.name]: v }, { silent: true });
         refreshJudge();
-      } else if (['machineId', 'storeId', 'splitRb', 'countSmall'].includes(t.name)) {
+      } else if (t.name === 'splitRb' || t.name === 'splitBb') {
+        // 切り替えても数えたボーナスが消えないようにする
+        const js = judgeState;
+        const b = t.name === 'splitBb' ? 'bb' : 'rb';
+        const label = b === 'bb' ? 'BIG' : 'REG';
+        const solo = `${b}Solo`;
+        const cherry = `${b}Cherry`;
+        if (t.checked && js[b] > 0 && !js[solo] && !js[cherry]) {
+          if (!confirm(`これまでの ${label} ${js[b]}回は内訳が分からないため、単独${label} に入れて数え始めます。よろしいですか？`)) {
+            t.checked = false;
+            return;
+          }
+          js[solo] = js[b];
+          js[b] = 0;
+        } else if (!t.checked && (js[solo] || js[cherry])) {
+          js[b] = (js[solo] || 0) + (js[cherry] || 0);
+          js[solo] = 0;
+          js[cherry] = 0;
+        }
+        js[t.name] = t.checked;
+        js.history = [];
+        saveJudgeState();
+        render();
+      } else if (['machineId', 'storeId', 'countSmall'].includes(t.name)) {
         judgeState[t.name] = t.type === 'checkbox' ? t.checked : t.value;
         saveJudgeState();
         render();
@@ -690,6 +740,11 @@ async function init() {
   main.addEventListener('change', onChange);
   main.addEventListener('submit', onSubmit);
   main.addEventListener('toggle', (e) => {
+    if (e.target.matches?.('details.counter-opts')) {
+      judgeState.optsOpen = e.target.open;
+      saveJudgeState();
+      return;
+    }
     if (!e.target.matches?.('details.more') || !draft) return;
     draft.detailOpen = e.target.open;
     // 次回も同じ状態で開く（時給・期待値を毎回入れる人向け）

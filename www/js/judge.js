@@ -20,18 +20,42 @@ const STEP = 10;
  * - ブドウ・チェリーは「小役も数える」がオンのときだけ（数えていない 0 回を「出ていない」と誤解しないため）
  */
 export function usedCategories(machine, c) {
-  const cats = [{ key: 'bb', n: c.bb, denoms: machine.bb }];
-  if (c.splitRb && machine.rbSolo && machine.rbCherry) {
-    cats.push({ key: 'rbSolo', n: c.rbSolo, denoms: machine.rbSolo }, { key: 'rbCherry', n: c.rbCherry, denoms: machine.rbCherry });
-  } else {
-    cats.push({ key: 'rb', n: totalRb(c), denoms: machine.rb });
+  const cats = [];
+  for (const [b, split, total] of [['bb', c.splitBb, totalBb(c)], ['rb', c.splitRb, totalRb(c)]]) {
+    const solo = machine[`${b}Solo`];
+    const cherry = solo && cherryDenoms(machine[b], solo, machine[`${b}Cherry`]);
+    if (split && cherry) {
+      cats.push({ key: `${b}Solo`, n: c[`${b}Solo`], denoms: solo }, { key: `${b}Cherry`, n: c[`${b}Cherry`], denoms: cherry });
+    } else {
+      cats.push({ key: b, n: total, denoms: machine[b] });
+    }
   }
-  if (c.countSmall && machine.grape) cats.push({ key: 'grape', n: c.grape, denoms: machine.grape });
-  if (c.countSmall && machine.cherry) cats.push({ key: 'cherry', n: c.cherry, denoms: machine.cherry });
+  if (counting(c, 'grape') && machine.grape) cats.push({ key: 'grape', n: c.grape, denoms: machine.grape });
+  if (counting(c, 'cherry') && machine.cherry) cats.push({ key: 'cherry', n: c.cherry, denoms: machine.cherry });
   return cats;
 }
 
+/**
+ * 小役を「数えている」とみなすか。0回のまま（数えていない）や、ありえない少なさ（途中から数え始めた等）は使わない。
+ * 目安：ブドウは 1/10 より多く、チェリーは 1/100 より多く出ているとき。
+ */
+function counting(c, key) {
+  if (!c.countSmall || !(c[key] > 0) || !(c.games > 0)) return false;
+  return c.games / c[key] <= (key === 'grape' ? 10 : 100);
+}
+
 export const totalRb = (c) => (c.splitRb ? (c.rbSolo || 0) + (c.rbCherry || 0) : c.rb || 0);
+export const totalBb = (c) => (c.splitBb ? (c.bbSolo || 0) + (c.bbCherry || 0) : c.bb || 0);
+
+/**
+ * チェリー重複ボーナスの確率。スペックにあればそれを使い、なければ「全体 − 単独」で求める
+ * （チェリーが止まったボーナスを「チェリー重複」と数える、ふつうの数え方に合わせる）。
+ */
+export function cherryDenoms(total, solo, explicit) {
+  if (explicit) return explicit;
+  const d = total.map((t, i) => 1 / (1 / t - 1 / solo[i]));
+  return d.every((x) => Number.isFinite(x) && x > 1) ? d : null;
+}
 
 /** 設定1〜6それぞれの可能性（合計 1）。counts: { games, bb, rb, rbSolo, rbCherry, grape, cherry, splitRb, countSmall } */
 export function settingPosterior(machine, counts, prior = PRIORS.flat.p) {
@@ -86,7 +110,7 @@ const toMin = (s) => Number(s.slice(0, 2)) * 60 + Number(s.slice(3, 5));
  */
 export function judge({ machine, counts, priorId = 'normal', todayMedals = 0, lossLimit = 0, stock = null, now, closingTime = '22:45', yenPerMedal = 20 }) {
   const games = counts.games || 0;
-  const bonus = (counts.bb || 0) + totalRb(counts);
+  const bonus = totalBb(counts) + totalRb(counts);
   const todayLoss = Math.max(0, -todayMedals);
   const limitLeft = lossLimit > 0 ? Math.max(0, lossLimit - todayLoss) : null;
   const caps = [limitLeft, stock == null ? null : Math.max(0, stock)].filter((v) => v != null);

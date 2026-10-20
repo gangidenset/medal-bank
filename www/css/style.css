@@ -520,3 +520,58 @@ input:focus, textarea:focus, .select:focus { outline: 2px solid var(--accent); o
 .verdict .kv { margin-top: 10px; }
 .kv dd small { display: block; font-size: 12px; color: var(--muted); font-weight: 400; }
 .kv-note { margin: -4px 0 4px; }
+
+/* ---- 小役カウンター（大きな色つきボタン） ---- */
+.kachi { background: #15171d; border-radius: 22px; padding: 10px; display: flex; flex-direction: column; gap: 10px; box-shadow: inset 0 1px 0 rgb(255 255 255 / 6%), 0 6px 18px rgb(0 0 0 / 18%); }
+.kachi.minus { box-shadow: 0 0 0 3px #ff5b5b, 0 6px 18px rgb(0 0 0 / 18%); }
+.kachi-status {
+  position: sticky; top: 60px; z-index: 6;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;
+  background: #22252e; border-radius: 14px; padding: 8px 6px; color: #fff; text-align: center;
+}
+.kachi-status div { display: flex; flex-direction: column; min-width: 0; }
+.kachi-status span { font-size: 11px; color: #a9afbd; font-weight: 700; }
+.kachi-status strong { font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.kachi-status .hi strong { color: #ffd34d; }
+.kachi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.kachi-grid.odd .kachi-btn:first-child { grid-column: 1 / -1; }
+.kachi-btn {
+  --c1: #555; --c2: #333;
+  position: relative; min-height: 132px; padding: 10px 8px 12px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0;
+  border: 0; border-radius: 18px; color: #fff; cursor: pointer;
+  background: linear-gradient(180deg, var(--c1), var(--c2));
+  box-shadow: inset 0 2px 0 rgb(255 255 255 / 25%), inset 0 -4px 0 rgb(0 0 0 / 25%), 0 4px 0 rgb(0 0 0 / 35%);
+  touch-action: manipulation; user-select: none; -webkit-user-select: none;
+  transition: transform .05s, box-shadow .05s, filter .05s;
+}
+.kachi-btn:active { transform: translateY(3px); box-shadow: inset 0 2px 0 rgb(255 255 255 / 15%), inset 0 -2px 0 rgb(0 0 0 / 25%), 0 1px 0 rgb(0 0 0 / 35%); filter: brightness(1.1); }
+.kachi-grid.odd .kachi-btn:first-child { min-height: 112px; }
+.k-big { --c1: #f2464b; --c2: #b8161d; }
+.k-reg { --c1: #3b82f6; --c2: #1d4fc0; }
+.k-creg { --c1: #8b5cf6; --c2: #5b2dc4; }
+.k-grape { --c1: #7ac943; --c2: #3f8a1a; }
+.k-cherry { --c1: #f2609b; --c2: #c2245f; }
+.k-label { font-size: 15px; font-weight: 800; letter-spacing: .04em; text-shadow: 0 1px 0 rgb(0 0 0 / 30%); }
+.k-num { font-size: 52px; line-height: 1.05; font-weight: 800; font-variant-numeric: tabular-nums; text-shadow: 0 2px 0 rgb(0 0 0 / 30%); }
+.k-prob { font-size: 14px; font-weight: 700; background: rgb(0 0 0 / 22%); border-radius: 99px; padding: 1px 10px; font-variant-numeric: tabular-nums; }
+.kachi.minus .kachi-btn::after { content: "−1"; position: absolute; bottom: 10px; right: 10px; font-size: 14px; font-weight: 800; background: #fff; color: #d11; border-radius: 99px; padding: 0 7px; }
+.kachi-btn.bump .k-num { animation: bump .18s ease-out; }
+@keyframes bump { 0% { transform: scale(1); } 40% { transform: scale(1.18); } 100% { transform: scale(1); } }
+.kachi-tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.k-tool {
+  min-height: 48px; border-radius: 12px; border: 0; background: #2c303b; color: #e8eaf0;
+  font-size: 15px; font-weight: 800; cursor: pointer; touch-action: manipulation;
+}
+.k-tool:active { filter: brightness(1.2); }
+.k-tool.on { background: #ff5b5b; color: #fff; }
+.k-tool:disabled { opacity: .4; }
+.k-minus-note { margin: -2px 0 0; text-align: center; color: #ff8a8a; font-size: 13px; font-weight: 700; }
+@media (max-width: 359px) {
+  .kachi-btn { min-height: 118px; }
+  .k-num { font-size: 44px; }
+  .k-label { font-size: 13px; letter-spacing: 0; }
+  .kachi-status strong { font-size: 14px; }
+}
+@media (prefers-reduced-motion: reduce) { .kachi-btn.bump .k-num { animation: none; } }
+.k-cbig { --c1: #ff8a3d; --c2: #c8510c; }

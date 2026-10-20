@@ -489,25 +489,31 @@ const VERDICTS = {
   stop: { icon: '🔴', label: 'ヤメ推奨', cls: 'stop' },
 };
 
-/** カウンターの項目。REG は「単独・チェリーに分ける」とき 2つに分かれる */
+/** カウンターの項目（色つきの大きなボタン）。BIG・REG は「単独・チェリーに分ける」とき 2つに分かれる */
 export function counterItems(js) {
-  const items = [{ key: 'bb', label: 'BIG' }];
-  if (js.splitRb) items.push({ key: 'rbSolo', label: '単独REG' }, { key: 'rbCherry', label: 'チェリーREG' });
-  else items.push({ key: 'rb', label: 'REG' });
-  if (js.countSmall) items.push({ key: 'grape', label: 'ブドウ' }, { key: 'cherry', label: 'チェリー' });
+  const items = js.splitBb
+    ? [{ key: 'bbSolo', label: '単独BIG', color: 'big' }, { key: 'bbCherry', label: 'チェリーBIG', color: 'cbig' }]
+    : [{ key: 'bb', label: 'BIG', color: 'big' }];
+  if (js.splitRb) items.push({ key: 'rbSolo', label: '単独REG', color: 'reg' }, { key: 'rbCherry', label: 'チェリーREG', color: 'creg' });
+  else items.push({ key: 'rb', label: 'REG', color: 'reg' });
+  if (js.countSmall) items.push({ key: 'grape', label: 'ブドウ', color: 'grape' }, { key: 'cherry', label: 'チェリー', color: 'cherry' });
   return items;
 }
 
 /** 出現率（1/88.2、ブドウなど 1/10 未満は 1/6.02） */
 export const prob = (games, n) => (n > 0 && games > 0 ? `1/${(games / n).toFixed(games / n >= 10 ? 1 : 2)}` : '−');
 
-/** カウンターの数字と確率（タップのたびにここだけ書き換える） */
+/** 上に固定する状態表示（合算・REG・設定4以上の可能性）。タップのたびにここだけ書き換える */
 export function counterStats(js) {
   const g = Number(js.games) || 0;
   const rb = js.splitRb ? (js.rbSolo || 0) + (js.rbCherry || 0) : js.rb || 0;
+  const bb = js.splitBb ? (js.bbSolo || 0) + (js.bbCherry || 0) : js.bb || 0;
+  const high = js.result?.high;
   return `
-    <span>合算 <strong data-testid="jd-combined">${prob(g, (js.bb || 0) + rb)}</strong></span>
-    ${js.splitRb ? `<span>REG ${prob(g, rb)}</span>` : ''}`;
+    <div><span>G数</span><strong>${g ? num(g) : '−'}</strong></div>
+    <div><span>合算</span><strong data-testid="jd-combined">${prob(g, bb + rb)}</strong></div>
+    <div><span>REG</span><strong>${prob(g, rb)}</strong></div>
+    <div class="hi"><span>設定4以上</span><strong data-testid="jd-high-mini">${high == null ? '−' : `${Math.round(high * 100)}%`}</strong></div>`;
 }
 
 export function judgeView(vm, js, { machines, priors }) {
@@ -516,7 +522,12 @@ export function judgeView(vm, js, { machines, priors }) {
   const v = (k) => esc(js[k] ?? '');
   const store = data.store(js.storeId);
   const machine = machines.find((m) => m.id === js.machineId);
-  const missing = machine ? ['rbSolo', 'rbCherry', 'grape', 'cherry'].filter((k) => !machine[k]) : [];
+  const missing = machine ? [
+    ...(js.splitBb && !machine.bbSolo ? ['単独BIG・チェリーBIG'] : []),
+    ...(js.splitRb && !machine.rbSolo ? ['単独REG・チェリーREG'] : []),
+    ...(js.countSmall && !machine.grape ? ['ブドウ'] : []),
+    ...(js.countSmall && !machine.cherry ? ['チェリー'] : []),
+  ] : [];
   return `
     ${topbar('実戦カウンター', { back: '#/home' })}
     <form class="content" id="judge-form" novalidate autocomplete="off">
@@ -532,22 +543,31 @@ export function judgeView(vm, js, { machines, priors }) {
       <div class="field"><label class="field-label" for="jd-games">現在G数（データカウンターの総G数）</label>
         <div class="unit-input"><input id="jd-games" name="games" type="number" inputmode="numeric" min="0" step="1" placeholder="0" value="${v('games')}"><span>G</span></div></div>
 
-      <div class="counter-grid" data-testid="counter">
-        ${counterItems(js).map((it) => `
-          <div class="counter">
-            <button type="button" class="counter-plus" data-action="count" data-key="${it.key}" data-d="1" aria-label="${it.label}を1回足す">
-              <span class="counter-label">${it.label}</span>
-              <strong class="counter-num" data-testid="count-${it.key}">${js[it.key] || 0}</strong>
-              <span class="counter-prob" data-prob="${it.key}">${prob(Number(js.games) || 0, js[it.key] || 0)}</span>
-            </button>
-            <button type="button" class="counter-minus" data-action="count" data-key="${it.key}" data-d="-1" aria-label="${it.label}を1回減らす">−</button>
-          </div>`).join('')}
+      <div class="kachi${js.minusMode ? ' minus' : ''}" data-testid="counter">
+        <div class="kachi-status" id="jd-stats" aria-live="polite">${counterStats(js)}</div>
+        <div class="kachi-grid${counterItems(js).length % 2 ? ' odd' : ''}">
+          ${counterItems(js).map((it) => `
+            <button type="button" class="kachi-btn k-${it.color}" data-action="count" data-key="${it.key}" aria-label="${it.label}を${js.minusMode ? '1回減らす' : '数える'}">
+              <span class="k-label">${it.label}</span>
+              <strong class="k-num" data-testid="count-${it.key}">${js[it.key] || 0}</strong>
+              <span class="k-prob" data-prob="${it.key}">${prob(Number(js.games) || 0, js[it.key] || 0)}</span>
+            </button>`).join('')}
+        </div>
+        <div class="kachi-tools">
+          <button type="button" class="k-tool${js.minusMode ? ' on' : ''}" data-action="minus-mode" aria-pressed="${Boolean(js.minusMode)}">−モード</button>
+          <button type="button" class="k-tool" data-action="count-undo" ${js.history?.length ? '' : 'disabled'}>1つ戻す</button>
+          <button type="button" class="k-tool" data-action="count-reset">リセット</button>
+        </div>
+        ${js.minusMode ? '<p class="k-minus-note">−モード中：タップすると1回減ります</p>' : ''}
       </div>
-      <div class="counter-stats" id="jd-stats">${counterStats(js)}</div>
-      <label class="switch"><input type="checkbox" name="splitRb" ${js.splitRb ? 'checked' : ''}><span>REG を単独・チェリー重複に分けて数える</span></label>
-      <label class="switch"><input type="checkbox" name="countSmall" ${js.countSmall ? 'checked' : ''}><span>ブドウ・チェリーも数える</span></label>
-      ${machine && missing.length && (js.countSmall || js.splitRb) ? `<p class="hint">この機種は ${missing.map((k) => ({ rbSolo: '単独REG', rbCherry: 'チェリーREG', grape: 'ブドウ', cherry: 'チェリー' })[k]).join('・')} の確率が未入力のため、推測には使っていません。「スペック」から入力できます。</p>` : ''}
-      <button type="button" class="link-btn" data-action="count-reset">カウントをリセット</button>
+      <details class="more counter-opts"${js.optsOpen ? ' open' : ''}>
+        <summary>数える項目（BIG・REGの内訳・ブドウ・チェリー）</summary>
+        <label class="switch"><input type="checkbox" name="splitBb" ${js.splitBb ? 'checked' : ''}><span>BIG を単独・チェリー重複に分けて数える</span></label>
+        <label class="switch"><input type="checkbox" name="splitRb" ${js.splitRb ? 'checked' : ''}><span>REG を単独・チェリー重複に分けて数える</span></label>
+        <label class="switch"><input type="checkbox" name="countSmall" ${js.countSmall ? 'checked' : ''}><span>ブドウ・チェリーも数える</span></label>
+        <p class="hint">ブドウは、数えた回数が 1/10 より多いときだけ設定推測に使います（数え忘れの 0回で推測が狂わないように）。</p>
+      </details>
+      ${machine && missing.length ? `<p class="hint">この機種は ${missing.join('・')} の確率がないため、推測には使っていません（数えた回数は記録できます）。「スペック」から入力できます。</p>` : ''}
 
       <div id="judge-result" aria-live="polite">${judgeResult(vm, js)}</div>
 
@@ -612,6 +632,7 @@ export function specView(vm, machine, fields) {
     ${topbar(isNew ? '機種を追加' : 'スペックを編集', { back: '#/judge' })}
     <form class="content" id="spec-form" novalidate autocomplete="off">
       <p class="hint pad">設定1〜6の値を、カンマ区切りで6つ入力します。確率は分母（1/273.1 なら 273.1）。解析サイトなどの値を使ってください。空欄の項目は推測に使いません。</p>
+      ${machine?.builtin ? `<p class="hint pad" data-testid="spec-source">組み込みの値：BIG・REG・機械割は解析サイトの掲載値${machine.note ? `、${esc(machine.note)}` : ''}です。チェリーは数え方がサイトによって違うため入れていません。</p>` : ''}
       <div class="field"><label class="field-label" for="sp-name">機種名</label>
         <input id="sp-name" name="name" type="text" maxlength="40" value="${esc(machine?.name ?? '')}" ${machine?.builtin ? 'readonly' : ''} placeholder="例：ハッピージャグラー"></div>
       ${fields.map((f) => `
