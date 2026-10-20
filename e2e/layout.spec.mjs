@@ -84,6 +84,10 @@ test('横向き：どの画面も横スクロールが出ず、実戦カウン�
 test('manifest は画面の向きを固定しない', async ({ request }) => {
   const manifest = await (await request.get('/manifest.json')).json();
   expect(manifest.orientation).toBe('any');
+  // id はサイトの一番上ではなく、このアプリのフォルダにする。
+  // "./" だと同じ gangidenset.github.io の他のアプリ（my-money・内装アプリ）と同じアプリだと Chrome に判断され、
+  // 片方を入れるともう片方が「インストール済み」になって入れられなくなる
+  expect(manifest.id).toBe('/medal-bank/');
 });
 
 test('「横向き」ボタン：横に固定できない環境では案内を出す', async ({ page }) => {
