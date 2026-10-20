@@ -500,6 +500,9 @@ export function counterItems(js) {
   return items;
 }
 
+/** 横向きに固定中か（全画面で横に固定したとき） */
+const landscapeLocked = () => typeof document !== 'undefined' && Boolean(document.fullscreenElement);
+
 /** 出現率（1/88.2、ブドウなど 1/10 未満は 1/6.02） */
 export const prob = (games, n) => (n > 0 && games > 0 ? `1/${(games / n).toFixed(games / n >= 10 ? 1 : 2)}` : '−');
 
@@ -545,7 +548,7 @@ export function judgeView(vm, js, { machines, priors }) {
 
       <div class="kachi${js.minusMode ? ' minus' : ''}" data-testid="counter">
         <div class="kachi-status" id="jd-stats" aria-live="polite">${counterStats(js)}</div>
-        <div class="kachi-grid${counterItems(js).length % 2 ? ' odd' : ''}">
+        <div class="kachi-grid${counterItems(js).length % 2 ? ' odd' : ''}" style="--cols:${counterItems(js).length}">
           ${counterItems(js).map((it) => `
             <button type="button" class="kachi-btn k-${it.color}" data-action="count" data-key="${it.key}" aria-label="${it.label}を${js.minusMode ? '1回減らす' : '数える'}">
               <span class="k-label">${it.label}</span>
@@ -557,6 +560,7 @@ export function judgeView(vm, js, { machines, priors }) {
           <button type="button" class="k-tool${js.minusMode ? ' on' : ''}" data-action="minus-mode" aria-pressed="${Boolean(js.minusMode)}">−モード</button>
           <button type="button" class="k-tool" data-action="count-undo" ${js.history?.length ? '' : 'disabled'}>1つ戻す</button>
           <button type="button" class="k-tool" data-action="count-reset">リセット</button>
+          <button type="button" class="k-tool" data-action="landscape" data-testid="landscape">${landscapeLocked() ? '縦に戻す' : '横向き'}</button>
         </div>
         ${js.minusMode ? '<p class="k-minus-note">−モード中：タップすると1回減ります</p>' : ''}
       </div>

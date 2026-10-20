@@ -15,7 +15,7 @@ import { pendingNotices } from './notify.js';
 import { limit } from './plan.js';
 import * as ui from './ui.js';
 
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const STORAGE_LABELS = {
   indexeddb: 'この端末（IndexedDB）',
   localstorage: 'この端末（localStorage）',
@@ -202,6 +202,7 @@ function render() {
   }
   if (r.name !== 'record') draftKey = '';
   main.innerHTML = html;
+  document.body.dataset.route = r.name;
   for (const a of document.querySelectorAll('.nav a')) {
     if (a.dataset.tab === tab) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
@@ -399,6 +400,26 @@ const actions = {
     judgeState[k] = Math.max(0, (Number(judgeState[k]) || 0) - d);
     navigator.vibrate?.(8);
     refreshJudge();
+  },
+  // 横向き：Android は全画面にして横に固定できる。iPhone はウェブから向きを変えられないので案内を出す
+  landscape: async () => {
+    if (document.fullscreenElement) {
+      screen.orientation?.unlock?.();
+      await document.exitFullscreen().catch(() => {});
+      render();
+      return;
+    }
+    try {
+      if (!document.documentElement.requestFullscreen || !screen.orientation?.lock) throw new Error('unsupported');
+      await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+      await screen.orientation.lock('landscape');
+      render();
+    } catch {
+      if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+      toast(/iPhone|iPad|iPod/.test(navigator.userAgent)
+        ? 'iPhone では、コントロールセンターで「画面縦向きのロック」を解除して、スマホを横にしてください'
+        : '画面の自動回転をオンにして、スマホを横にしてください');
+    }
   },
   'minus-mode': () => {
     judgeState.minusMode = !judgeState.minusMode;
@@ -751,6 +772,11 @@ async function init() {
     if (data.settings.recordDetailOpen !== draft.detailOpen) data.updateSettings({ recordDetailOpen: draft.detailOpen }, { silent: true }).catch(fail);
   }, true);
   window.addEventListener('hashchange', render);
+  // 戻るジェスチャーなどで全画面（横向き固定）が終わったら、ボタンの表示を戻す
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement) screen.orientation?.unlock?.();
+    if (parseRoute().name === 'judge') render();
+  });
   let resizeTimer;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);

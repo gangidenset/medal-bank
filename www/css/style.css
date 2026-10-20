@@ -558,7 +558,7 @@ input:focus, textarea:focus, .select:focus { outline: 2px solid var(--accent); o
 .kachi.minus .kachi-btn::after { content: "−1"; position: absolute; bottom: 10px; right: 10px; font-size: 14px; font-weight: 800; background: #fff; color: #d11; border-radius: 99px; padding: 0 7px; }
 .kachi-btn.bump .k-num { animation: bump .18s ease-out; }
 @keyframes bump { 0% { transform: scale(1); } 40% { transform: scale(1.18); } 100% { transform: scale(1); } }
-.kachi-tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.kachi-tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .k-tool {
   min-height: 48px; border-radius: 12px; border: 0; background: #2c303b; color: #e8eaf0;
   font-size: 15px; font-weight: 800; cursor: pointer; touch-action: manipulation;
@@ -575,3 +575,32 @@ input:focus, textarea:focus, .select:focus { outline: 2px solid var(--accent); o
 }
 @media (prefers-reduced-motion: reduce) { .kachi-btn.bump .k-num { animation: none; } }
 .k-cbig { --c1: #ff8a3d; --c2: #c8510c; }
+
+/* ---- 横向き（スマホを横にしたとき） ---- */
+#main, .nav { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+@media (orientation: landscape) and (max-height: 540px) {
+  :root { --nav-h: 46px; }
+  .nav { left: 0; right: 0; width: auto; transform: none; border-radius: 0; border-left: 0; border-right: 0; }
+  .topbar { min-height: 46px; }
+  .topbar h1 { font-size: 18px; }
+  .nav a { flex-direction: row; gap: 6px; font-size: 12px; }
+  .nav .icon { width: 20px; height: 20px; }
+  .hero { padding: 14px 18px; }
+  .hero-num { font-size: 40px; }
+  .btn-record { min-height: 54px; }
+  .chart-svg { max-height: 220px; }
+  .toast { bottom: calc(var(--nav-h) + var(--safe-b) + 8px); }
+  /* 実戦カウンターは横いっぱいを使い、ボタンを1列に並べる */
+  body[data-route="judge"] #main { max-width: 980px; }
+  .kachi-status { top: 50px; grid-template-columns: repeat(4, auto); justify-content: space-around; padding: 6px; }
+  .kachi-grid { grid-template-columns: repeat(var(--cols, 4), 1fr); gap: 8px; }
+  .kachi-grid.odd .kachi-btn:first-child { grid-column: auto; min-height: 0; }
+  .kachi-btn { min-height: 0; height: calc(100dvh - 46px - 46px - 52px - 64px - 48px); max-height: 190px; min-height: 104px; padding: 6px 4px 8px; }
+  .k-num { font-size: clamp(34px, 7vh, 52px); }
+  .k-label { font-size: 13px; letter-spacing: 0; }
+  .k-prob { font-size: 12px; padding: 0 8px; }
+  .kachi-tools { grid-template-columns: repeat(4, 1fr); }
+  .k-tool { min-height: 44px; }
+}
+/* 全画面で横に固定したとき */
+:fullscreen body { background: var(--bg); }
