@@ -1,6 +1,6 @@
 {
   "name": "medal-bank",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "private": true,
   "description": "スロットの貯メダルを、自分の資産として管理するアプリ",
   "type": "module",
