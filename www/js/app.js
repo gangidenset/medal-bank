@@ -8,6 +8,7 @@ import {
 import { diagnose, guessMachineType } from './analysis.js';
 import { PRIORS, judge } from './judge.js';
 import { SPEC_FIELDS, allMachines, normalizeSpec } from './machines.js';
+import { GUIDES, guideKeyFor } from './guides.js';
 import { ValidationError, createDataService, newId } from './data.js';
 import { createDefaultStorage } from './storage.js';
 import { barChart, lineChart } from './chart.js';
@@ -15,7 +16,7 @@ import { pendingNotices } from './notify.js';
 import { limit } from './plan.js';
 import * as ui from './ui.js';
 
-const VERSION = '1.4.1';
+const VERSION = '1.5.0';
 const STORAGE_LABELS = {
   indexeddb: 'この端末（IndexedDB）',
   localstorage: 'この端末（localStorage）',
@@ -162,11 +163,14 @@ function render() {
       else if (r.id === 'diagnosis') html = ui.diagnosisView(vm, diagState);
       else html = ui.historyView(vm, historyState);
       break;
+    case 'counter':
     case 'judge': {
       if (!data.store(judgeState.storeId)) judgeState.storeId = data.settings.lastStoreId && data.store(data.settings.lastStoreId) ? data.settings.lastStoreId : data.stores[0]?.id ?? null;
       if (judgeState.machineId && !machineList().some((m) => m.id === judgeState.machineId)) judgeState.machineId = '';
       computeJudge();
-      html = ui.judgeView(vm, judgeState, { machines: machineList(), priors: PRIORS });
+      html = r.name === 'counter'
+        ? ui.counterScreen(vm, judgeState, { machines: machineList() })
+        : ui.judgeView(vm, judgeState, { machines: machineList(), priors: PRIORS });
       tab = 'home';
       break;
     }
@@ -194,6 +198,7 @@ function render() {
         standalone: matchMedia('(display-mode: standalone)').matches || navigator.standalone === true,
         canInstall: Boolean(installPrompt),
         ios: /iPhone|iPad|iPod/.test(navigator.userAgent),
+        guides: Object.entries(GUIDES).map(([key, g]) => [key, g.title]),
       });
       break;
     default:
@@ -203,6 +208,8 @@ function render() {
   if (r.name !== 'record') draftKey = '';
   main.innerHTML = html;
   document.body.dataset.route = r.name;
+  document.documentElement.dataset.route = r.name;
+  updateWakeLock(r.name === 'counter');
   for (const a of document.querySelectorAll('.nav a')) {
     if (a.dataset.tab === tab) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
@@ -218,7 +225,44 @@ function rerenderRecord() {
   main.innerHTML = ui.recordView(buildVM(), draft);
 }
 
+// ---- 使い方ガイド ----
+
+function openGuide(key) {
+  closeGuide();
+  const guide = GUIDES[key] ?? GUIDES.home;
+  const el = document.createElement('div');
+  el.id = 'guide-layer';
+  el.innerHTML = ui.guideSheet(guide);
+  document.body.append(el);
+  document.documentElement.classList.add('sheet-open');
+  el.querySelector('.sheet-head button')?.focus();
+}
+
+function closeGuide() {
+  document.getElementById('guide-layer')?.remove();
+  document.documentElement.classList.remove('sheet-open');
+}
+
 // ---- 実戦カウンター ----
+
+// 小役カウンターを開いている間は画面を消さない（対応ブラウザのみ。アプリを切り替えると自動で解除される）
+let wakeLock = null;
+let wantWake = false;
+async function updateWakeLock(on) {
+  wantWake = on;
+  try {
+    if (on && !wakeLock && 'wakeLock' in navigator && document.visibilityState === 'visible') {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } else if (!on && wakeLock) {
+      await wakeLock.release();
+      wakeLock = null;
+    }
+  } catch { wakeLock = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && wantWake) updateWakeLock(true);
+});
 
 function computeJudge() {
   const js = judgeState;
@@ -257,7 +301,7 @@ function refreshJudge() {
     if (p) p.textContent = ui.prob(games, judgeState[k]);
   }
   const stats = document.getElementById('jd-stats');
-  if (stats) stats.innerHTML = ui.counterStats(judgeState);
+  if (stats) stats.innerHTML = ui.counterStats(judgeState, { games: !stats.dataset.nogames });
   const undo = main.querySelector('[data-action="count-undo"]');
   if (undo) undo.disabled = !judgeState.history.length;
   const res = document.getElementById('judge-result');
@@ -421,6 +465,8 @@ const actions = {
         : '画面の自動回転をオンにして、スマホを横にしてください');
     }
   },
+  guide: (el) => openGuide(el.dataset.key || guideKeyFor(parseRoute())),
+  'guide-close': () => closeGuide(),
   'minus-mode': () => {
     judgeState.minusMode = !judgeState.minusMode;
     render();
@@ -771,11 +817,12 @@ async function init() {
     // 次回も同じ状態で開く（時給・期待値を毎回入れる人向け）
     if (data.settings.recordDetailOpen !== draft.detailOpen) data.updateSettings({ recordDetailOpen: draft.detailOpen }, { silent: true }).catch(fail);
   }, true);
-  window.addEventListener('hashchange', render);
+  window.addEventListener('hashchange', () => { closeGuide(); render(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeGuide(); });
   // 戻るジェスチャーなどで全画面（横向き固定）が終わったら、ボタンの表示を戻す
   document.addEventListener('fullscreenchange', () => {
     if (!document.fullscreenElement) screen.orientation?.unlock?.();
-    if (parseRoute().name === 'judge') render();
+    if (['judge', 'counter'].includes(parseRoute().name)) render();
   });
   let resizeTimer;
   window.addEventListener('resize', () => {

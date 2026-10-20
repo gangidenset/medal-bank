@@ -41,7 +41,7 @@ test('機種タイプ・ゲーム数を記録でき、ジャグラーは機種�
 test('実戦カウンター：タップで数え、設定の可能性と続行・ヤメを表示。閉じても残る', async ({ page }) => {
   await openApp(page, { data: { stores: [A], settings: { lastStoreId: 'a' } }, now: new Date('2026-10-20T15:00:00+09:00') });
   await page.getByTestId('judge-button').click();
-  await expect(page.getByRole('heading', { name: '実戦カウンター' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '続行・ヤメ判断', exact: true })).toBeVisible();
   await expect(page.getByTestId('jd-stock')).toHaveText('2,800枚');
   await page.getByLabel('現在G数（データカウンターの総G数）').fill('3000');
   const plus = async (name, times) => {

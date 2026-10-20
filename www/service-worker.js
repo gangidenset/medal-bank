@@ -2,7 +2,7 @@
 // 方針：キャッシュをすぐ返して起動を速くし（電波の弱い店内でも待たない）、裏でネットワークから最新を取ってキャッシュを更新する。
 // 更新は次回の起動から反映される。アプリのファイルを追加・削除したら SHELL を更新し、CACHE の番号を上げる。
 
-const CACHE = 'medal-bank-v6';
+const CACHE = 'medal-bank-v7';
 const SHELL = [
   './',
   './index.html',
@@ -13,6 +13,7 @@ const SHELL = [
   './js/calculation.js',
   './js/chart.js',
   './js/data.js',
+  './js/guides.js',
   './js/judge.js',
   './js/machines.js',
   './js/notify.js',

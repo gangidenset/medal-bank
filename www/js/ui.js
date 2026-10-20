@@ -37,12 +37,37 @@ const ICONS = {
 };
 export const icon = (name, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
 
+/** 右上の「？」：押すとその画面の使い方ガイドが開く */
+const helpButton = (cls = 'icon-btn help-btn') => `<button type="button" class="${cls}" data-action="guide" aria-label="使い方ガイド" data-testid="help">?</button>`;
+
 const topbar = (title, { back = null, right = '' } = {}) => `
   <header class="topbar">
     ${back ? `<a class="icon-btn" href="${back}" aria-label="戻る">${icon('back')}</a>` : ''}
     <h1>${esc(title)}</h1>
     ${right}
+    ${helpButton()}
   </header>`;
+
+/** 使い方ガイド（画面の下から出るシート） */
+export function guideSheet(guide) {
+  return `
+    <div class="sheet-backdrop" data-action="guide-close"></div>
+    <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="guide-title" data-testid="guide">
+      <header class="sheet-head">
+        <h2 id="guide-title">${esc(guide.title)}</h2>
+        <button type="button" class="icon-btn" data-action="guide-close" aria-label="閉じる">✕</button>
+      </header>
+      <div class="sheet-body">
+        ${guide.sections.map((sec) => `
+          <section class="guide-sec">
+            <h3>${esc(sec.h)}</h3>
+            ${sec.p ? `<p>${esc(sec.p)}</p>` : ''}
+            ${sec.steps ? `<ol>${sec.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>` : ''}
+            ${sec.items ? `<ul>${sec.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+          </section>`).join('')}
+      </div>
+    </section>`;
+}
 
 /** 記録 1件のカード（ホームと履歴で共通） */
 export function txCard(t, store, method) {
@@ -125,6 +150,7 @@ const emptyStores = () => `
     <h2 class="card-title">はじめに店舗を登録しましょう</h2>
     <p>貯メダルがあるお店と、交換枚数（1,000円分に必要な枚数）を登録すると、今いくらの資産なのかが分かります。</p>
     <a class="btn-primary" href="#/store/new">＋ 店舗を登録</a>
+    <button type="button" class="btn" data-action="guide" data-key="stores" style="margin-top:10px">使い方を見る（初めての店舗・現金スタート）</button>
   </div>`;
 
 // ---- ホーム ----
@@ -159,7 +185,11 @@ export function homeView(vm) {
         </div>
       </div>
       <a class="btn-record" href="#/record" data-testid="record-button">${icon('record')}今日の記録</a>
-      ${can('judge') ? '<a class="btn-sub" href="#/judge" data-testid="judge-button">🎰 実戦カウンター・ヤメ判断</a>' : ''}
+      ${can('judge') ? `
+        <div class="sub-row">
+          <a class="btn-sub" href="#/counter" data-testid="counter-button">🎰 小役カウンター</a>
+          <a class="btn-sub" href="#/judge" data-testid="judge-button">📊 続行・ヤメ判断</a>
+        </div>` : ''}
       ${goalCard(goal, { compact: true })}
       <section class="section">
         <div class="section-head"><h2>店舗別の貯メダル資産</h2><a href="#/stores">店舗</a></div>
@@ -507,16 +537,66 @@ const landscapeLocked = () => typeof document !== 'undefined' && Boolean(documen
 export const prob = (games, n) => (n > 0 && games > 0 ? `1/${(games / n).toFixed(games / n >= 10 ? 1 : 2)}` : '−');
 
 /** 上に固定する状態表示（合算・REG・設定4以上の可能性）。タップのたびにここだけ書き換える */
-export function counterStats(js) {
+export function counterStats(js, { games = true } = {}) {
   const g = Number(js.games) || 0;
   const rb = js.splitRb ? (js.rbSolo || 0) + (js.rbCherry || 0) : js.rb || 0;
   const bb = js.splitBb ? (js.bbSolo || 0) + (js.bbCherry || 0) : js.bb || 0;
   const high = js.result?.high;
   return `
-    <div><span>G数</span><strong>${g ? num(g) : '−'}</strong></div>
+    ${games ? `<div><span>G数</span><strong>${g ? num(g) : '−'}</strong></div>` : ''}
     <div><span>合算</span><strong data-testid="jd-combined">${prob(g, bb + rb)}</strong></div>
     <div><span>REG</span><strong>${prob(g, rb)}</strong></div>
     <div class="hi"><span>設定4以上</span><strong data-testid="jd-high-mini">${high == null ? '−' : `${Math.round(high * 100)}%`}</strong></div>`;
+}
+
+/** 色つきの大きなボタン（実戦カウンター・全画面の小役カウンターで共通） */
+function counterButtons(js, extraClass = '') {
+  const items = counterItems(js);
+  return `
+        <div class="kachi-grid${items.length % 2 ? ' odd' : ''} ${extraClass}" style="--cols:${items.length}">
+          ${items.map((it) => `
+            <button type="button" class="kachi-btn k-${it.color}" data-action="count" data-key="${it.key}" aria-label="${it.label}を${js.minusMode ? '1回減らす' : '数える'}">
+              <span class="k-label">${it.label}</span>
+              <strong class="k-num" data-testid="count-${it.key}">${js[it.key] || 0}</strong>
+              <span class="k-prob" data-prob="${it.key}">${prob(Number(js.games) || 0, js[it.key] || 0)}</span>
+            </button>`).join('')}
+        </div>`;
+}
+
+function counterTools(js) {
+  return `
+        <div class="kachi-tools">
+          <button type="button" class="k-tool${js.minusMode ? ' on' : ''}" data-action="minus-mode" aria-pressed="${Boolean(js.minusMode)}">−モード</button>
+          <button type="button" class="k-tool" data-action="count-undo" ${js.history?.length ? '' : 'disabled'}>1つ戻す</button>
+          <button type="button" class="k-tool" data-action="count-reset">リセット</button>
+          <button type="button" class="k-tool" data-action="landscape" data-testid="landscape">${landscapeLocked() ? '縦に戻す' : '横向き'}</button>
+        </div>`;
+}
+
+/**
+ * 全画面の小役カウンター（#/counter）。スクロールせず、数えるためのものだけを画面いっぱいに出す。
+ * 判定・条件の設定は「判定」（#/judge）で行う。数えた回数は同じものを使う。
+ */
+export function counterScreen(vm, js, { machines }) {
+  const machine = machines.find((m) => m.id === js.machineId);
+  return `
+    <form class="cscreen${js.minusMode ? ' minus' : ''}" id="judge-form" novalidate autocomplete="off" data-testid="counter-screen">
+      <div class="cs-head">
+        <a class="cs-btn" href="#/home" aria-label="閉じる">✕</a>
+        <select name="machineId" class="cs-machine" aria-label="機種">
+          ${machines.map((m) => `<option value="${esc(m.id)}"${js.machineId === m.id ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}
+          <option value=""${!machine ? ' selected' : ''}>その他の機種</option>
+        </select>
+        ${helpButton('cs-btn')}
+        <a class="cs-btn wide" href="#/judge" data-testid="to-judge">判定</a>
+      </div>
+      <div class="cs-bar">
+        <label class="cs-games"><span>G数</span><input name="games" type="number" inputmode="numeric" min="0" step="1" placeholder="0" value="${esc(js.games ?? '')}" aria-label="現在G数"></label>
+        <div class="kachi-status cs-status" id="jd-stats" data-nogames="1" aria-live="polite">${counterStats(js, { games: false })}</div>
+      </div>
+      ${counterButtons(js, 'cs-grid')}
+      ${counterTools(js)}
+    </form>`;
 }
 
 export function judgeView(vm, js, { machines, priors }) {
@@ -532,7 +612,7 @@ export function judgeView(vm, js, { machines, priors }) {
     ...(js.countSmall && !machine.cherry ? ['チェリー'] : []),
   ] : [];
   return `
-    ${topbar('実戦カウンター', { back: '#/home' })}
+    ${topbar('続行・ヤメ判断', { back: '#/home' })}
     <form class="content" id="judge-form" novalidate autocomplete="off">
       <div class="field"><label class="field-label" for="jd-machine">機種</label>
         <div class="inline-form flush">
@@ -546,22 +626,11 @@ export function judgeView(vm, js, { machines, priors }) {
       <div class="field"><label class="field-label" for="jd-games">現在G数（データカウンターの総G数）</label>
         <div class="unit-input"><input id="jd-games" name="games" type="number" inputmode="numeric" min="0" step="1" placeholder="0" value="${v('games')}"><span>G</span></div></div>
 
+      <a class="btn-sub" href="#/counter" data-testid="open-counter">⛶ 全画面の小役カウンターで数える</a>
       <div class="kachi${js.minusMode ? ' minus' : ''}" data-testid="counter">
         <div class="kachi-status" id="jd-stats" aria-live="polite">${counterStats(js)}</div>
-        <div class="kachi-grid${counterItems(js).length % 2 ? ' odd' : ''}" style="--cols:${counterItems(js).length}">
-          ${counterItems(js).map((it) => `
-            <button type="button" class="kachi-btn k-${it.color}" data-action="count" data-key="${it.key}" aria-label="${it.label}を${js.minusMode ? '1回減らす' : '数える'}">
-              <span class="k-label">${it.label}</span>
-              <strong class="k-num" data-testid="count-${it.key}">${js[it.key] || 0}</strong>
-              <span class="k-prob" data-prob="${it.key}">${prob(Number(js.games) || 0, js[it.key] || 0)}</span>
-            </button>`).join('')}
-        </div>
-        <div class="kachi-tools">
-          <button type="button" class="k-tool${js.minusMode ? ' on' : ''}" data-action="minus-mode" aria-pressed="${Boolean(js.minusMode)}">−モード</button>
-          <button type="button" class="k-tool" data-action="count-undo" ${js.history?.length ? '' : 'disabled'}>1つ戻す</button>
-          <button type="button" class="k-tool" data-action="count-reset">リセット</button>
-          <button type="button" class="k-tool" data-action="landscape" data-testid="landscape">${landscapeLocked() ? '縦に戻す' : '横向き'}</button>
-        </div>
+        ${counterButtons(js)}
+        ${counterTools(js)}
         ${js.minusMode ? '<p class="k-minus-note">−モード中：タップすると1回減ります</p>' : ''}
       </div>
       <details class="more counter-opts"${js.optsOpen ? ' open' : ''}>
@@ -770,6 +839,13 @@ export function settingsView(vm, env) {
               ? 'Safari の共有ボタン（□↑）→「ホーム画面に追加」で、アプリのように使えます。'
               : 'ブラウザのメニュー →「ホーム画面に追加」または「アプリをインストール」で、アプリのように使えます。'}</p>`}
           <p class="hint">ホーム画面から開くと、電波がない店内でも記録できます。</p>
+        </div>
+      </section>
+
+      <section class="section"><h2>使い方ガイド</h2>
+        <div class="card stack" data-testid="guide-list">
+          ${env.guides.map(([key, title]) => `<button class="btn guide-link" type="button" data-action="guide" data-key="${key}">${esc(title)}</button>`).join('')}
+          <p class="hint">各画面の右上の「？」からも、その画面の使い方を見られます。</p>
         </div>
       </section>
 
