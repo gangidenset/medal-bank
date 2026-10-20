@@ -1,0 +1,23 @@
+{
+  "name": "メダルバンク 貯メダル資産管理",
+  "short_name": "メダルバンク",
+  "description": "スロットの貯メダルを、自分の資産として管理するアプリ",
+  "lang": "ja",
+  "id": "./",
+  "start_url": "./#/home",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f3f4f8",
+  "theme_color": "#f3f4f8",
+  "categories": ["finance", "productivity", "utilities"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "貯メダルを記録", "short_name": "記録", "url": "./#/record", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "履歴を見る", "short_name": "履歴", "url": "./#/history", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

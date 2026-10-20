@@ -1,0 +1,20 @@
+{
+  "name": "medal-bank",
+  "version": "1.0.0",
+  "private": true,
+  "description": "スロットの貯メダルを、自分の資産として管理するアプリ",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test \"tests/*.test.mjs\"",
+    "test:e2e": "playwright test",
+    "test:all": "npm run lint && npm test && npm run test:e2e",
+    "lint": "eslint www e2e tests server.mjs",
+    "icons": "python scripts/make_icons.py"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "eslint": "9.39.1",
+    "globals": "16.5.0"
+  }
+}
