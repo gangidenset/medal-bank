@@ -20,6 +20,9 @@ export const DEFAULT_SETTINGS = {
   closingTime: '22:45', // ヤメ判断：閉店時刻
   judgePrior: 'normal', // ヤメ判断：店の状況（normal | event | flat）
   customMachines: [], // 利用者が編集・追加した機種スペック（machines.js の形）
+  recordInputMode: 'diff', // 記録の入力方法：diff（増減）| balance（保存後の残高）
+  monthlyLossLimit: 0, // 遊びすぎ防止：月の負けの上限（円、0 = 決めていない）
+  weeklyHoursLimit: 0, // 遊びすぎ防止：1週間の稼働時間の目安（時間、0 = 決めていない）
 };
 
 export class ValidationError extends Error {}
@@ -64,6 +67,16 @@ export function normalizeStore(input, prev = null) {
     exchangeRate,
     initialMedals,
     favorite: Boolean(pick('favorite', false)),
+    replayLimit: (() => {
+      const n = int(pick('replayLimit', 0));
+      if (!Number.isFinite(n) || n < 0 || n > 1_000_000) throw new ValidationError('再プレイの上限を正しく入力してください');
+      return n;
+    })(),
+    replayFee: (() => {
+      const n = Math.round(Number(pick('replayFee', 0) || 0) * 10) / 10;
+      if (!Number.isFinite(n) || n < 0 || n > 50) throw new ValidationError('再プレイ手数料は 0〜50% で入力してください');
+      return n;
+    })(),
     memo: text(pick('memo', ''), 500),
     createdAt: prev?.createdAt ?? (typeof input.createdAt === 'string' ? input.createdAt : nowISO()),
     updatedAt: nowISO(),
@@ -96,9 +109,11 @@ export function normalizeTransaction(input, prev = null, storeIds = null) {
       expectedValue: optInt(d.expectedValue),
       minutes: optInt(d.minutes),
       games: optInt(d.games),
+      high: optInt(d.high),
     };
     if (Object.values(detail).some((v) => v !== null && !Number.isFinite(v))) throw new ValidationError('遊技記録の数を正しく入力してください');
     if (detail.games !== null && !(detail.games >= 0 && detail.games <= 100000)) throw new ValidationError('ゲーム数を正しく入力してください');
+    if (detail.high !== null && !(detail.high >= 0 && detail.high <= 100)) detail.high = null;
     if (detail.expectedValue !== null && Math.abs(detail.expectedValue) > MAX_YEN) throw new ValidationError('期待値を正しく入力してください');
     if (detail.minutes !== null && !(detail.minutes > 0 && detail.minutes <= 1440)) detail.minutes = null;
     detail.startTime = /^\d{2}:\d{2}$/.test(d.startTime ?? '') ? d.startTime : null;
@@ -135,6 +150,11 @@ function normalizeSettings(input = {}) {
   if (Number.isFinite(loss) && loss >= 0 && loss <= MAX_MEDALS) s.dailyLossLimit = loss;
   if (/^\d{2}:\d{2}$/.test(input.closingTime ?? '')) s.closingTime = input.closingTime;
   if (['normal', 'event', 'flat'].includes(input.judgePrior)) s.judgePrior = input.judgePrior;
+  if (['diff', 'balance'].includes(input.recordInputMode)) s.recordInputMode = input.recordInputMode;
+  const mLoss = int(input.monthlyLossLimit);
+  if (Number.isFinite(mLoss) && mLoss >= 0 && mLoss <= MAX_YEN) s.monthlyLossLimit = mLoss;
+  const wHours = Number(input.weeklyHoursLimit);
+  if (Number.isFinite(wHours) && wHours >= 0 && wHours <= 168) s.weeklyHoursLimit = Math.round(wHours * 10) / 10;
   if (Array.isArray(input.customMachines)) {
     s.customMachines = input.customMachines.flatMap((m) => {
       try {
@@ -331,7 +351,7 @@ const csvCell = (v) => {
 export function toCSV(stores, transactions, method = 'floor') {
   const map = new Map(stores.map((s) => [s.id, s]));
   const head = ['日付', '時刻', '店舗', '理由', '増減枚数', '円換算', '現金収支', '機種', '台番号', '開始時貯メダル', '終了時貯メダル', '現金投資', '換金額',
-    '開始時刻', '稼働時間（分）', '期待値（円）', '時給換算（円）', '機種タイプ', 'ゲーム数', 'メモ'];
+    '開始時刻', '稼働時間（分）', '期待値（円）', '時給換算（円）', '機種タイプ', 'ゲーム数', '推定 設定4以上（%）', 'メモ'];
   const rows = [...transactions].reverse().map((t) => {
     const s = map.get(t.storeId);
     const hourly = perHour(txProfit(t, s?.exchangeRate), t.detail?.minutes);
@@ -341,7 +361,7 @@ export function toCSV(stores, transactions, method = 'floor') {
       t.machine, t.machineNumber,
       t.detail?.startMedals ?? '', t.detail?.endMedals ?? '', t.detail?.investment ?? '', t.detail?.payout ?? '',
       t.detail?.startTime ?? '', t.detail?.minutes ?? '', t.detail?.expectedValue ?? '', hourly == null ? '' : roundYen(hourly, method),
-      machineTypeLabel(t.machineType || guessMachineType(t.machine)), t.detail?.games ?? '',
+      machineTypeLabel(t.machineType || guessMachineType(t.machine)), t.detail?.games ?? '', t.detail?.high ?? '',
       t.memo,
     ];
   });

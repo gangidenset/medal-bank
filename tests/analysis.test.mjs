@@ -58,3 +58,16 @@ test('記録が少ないうちはコメントを出さない', () => {
   const d = diagnose([A], [play('2026-10-01', 100), play('2026-10-02', -100)]);
   assert.equal(d.insights.length, 0);
 });
+
+test('実戦カウンターの推定（設定4以上の%）別の成績と、低い台で負けているときのコメント', () => {
+  const txs = [
+    play('2026-10-01', 1500, { detail: { high: 75 } }),
+    play('2026-10-02', 800, { detail: { high: 65 } }),
+    play('2026-10-03', -1200, { detail: { high: 20 } }),
+    play('2026-10-04', -900, { detail: { high: 10 } }),
+    play('2026-10-05', 300, { detail: { high: 45 } }),
+  ];
+  const d = diagnose([A], txs);
+  assert.deepEqual(d.byHigh.map((g) => [g.key, g.count]), [['high', 2], ['mid', 1], ['low', 2]]);
+  assert.ok(d.insights.some((i) => i.text === '設定4以上の可能性が低い台で −42,000円 負けています。'), d.insights.map((i) => i.text).join('\n'));
+});

@@ -2,7 +2,7 @@
 // 方針：キャッシュをすぐ返して起動を速くし（電波の弱い店内でも待たない）、裏でネットワークから最新を取ってキャッシュを更新する。
 // 更新は次回の起動から反映される。アプリのファイルを追加・削除したら SHELL を更新し、CACHE の番号を上げる。
 
-const CACHE = 'medal-bank-v8';
+const CACHE = 'medal-bank-v9';
 const SHELL = [
   './',
   './index.html',
@@ -28,7 +28,9 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
+  // HTTP キャッシュ（GitHub Pages は10分）に残った古いファイルではなく、必ず最新を取ってくる
+  const fresh = SHELL.map((u) => new Request(new URL(u, self.location).href, { cache: 'reload' }));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(fresh)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {

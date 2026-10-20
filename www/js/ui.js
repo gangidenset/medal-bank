@@ -214,9 +214,22 @@ export function homeView(vm) {
 
 export const QUICK = [500, 1000, 1500, 2000];
 
-/** 入力中の値から、保存される枚数・現金を計算する */
-export function draftValues(draft) {
-  const medals = applySign(draft.type, draft.medals);
+/** 記録する前の、その店舗の貯メダル（編集中の記録の分は除く） */
+export function balanceBefore(vm, draft) {
+  const store = vm.data.store(draft.storeId);
+  if (!store) return 0;
+  const editing = draft.editId ? vm.data.transaction(draft.editId) : null;
+  return vm.data.balance(store.id) - (editing && editing.storeId === store.id ? editing.medals : 0);
+}
+
+/**
+ * 入力中の値から、保存される枚数・現金を計算する。
+ * 「残高で入力」のときは、保存後の残高 − 今の残高 が増減枚数になる。
+ */
+export function draftValues(draft, before = 0) {
+  const medals = draft.inputMode === 'balance'
+    ? (draft.balanceAfter === '' || draft.balanceAfter == null ? 0 : Math.trunc(Number(draft.balanceAfter)) - before)
+    : applySign(draft.type, draft.medals);
   const payout = Math.trunc(Number(draft.payout) || 0);
   const investment = Math.trunc(Number(draft.investment) || 0);
   return { medals, cash: payout - investment };
@@ -225,12 +238,12 @@ export function draftValues(draft) {
 export function recordPreview(vm, draft) {
   const store = vm.data.store(draft.storeId);
   if (!store) return '<span class="muted">店舗を選んでください</span>';
-  const { medals, cash } = draftValues(draft);
-  const editing = draft.editId ? vm.data.transaction(draft.editId) : null;
-  const before = vm.data.balance(store.id) - (editing && editing.storeId === store.id ? editing.medals : 0);
+  const before = balanceBefore(vm, draft);
+  const { medals, cash } = draftValues(draft, before);
   const after = before + medals;
   const y = roundYen(medalsToYen(medals, store.exchangeRate), vm.method);
   return `
+    ${draft.inputMode === 'balance' ? `<div class="preview-diff">増減 <strong class="${tone(medals)}" data-testid="preview-diff">${signed(medals)}枚</strong></div>` : ''}
     <div class="preview-yen ${tone(medals)}" data-testid="preview-yen">${signedYen(y)}相当</div>
     <div class="preview-bal">${esc(store.name)}：${num(before)}枚 → <strong data-testid="preview-after">${num(after)}枚</strong>（${yen(roundYen(medalsToYen(after, store.exchangeRate), vm.method))}）</div>
     ${cash ? `<div class="preview-bal">現金 ${signed(cash)}円</div>` : ''}
@@ -243,7 +256,7 @@ export function workPreview(vm, draft) {
   const mins = playMinutes(draft.startTime, draft.time);
   const ev = draft.expectedValue === '' || draft.expectedValue == null ? null : Math.trunc(Number(draft.expectedValue));
   if (!mins) return '<span class="muted">開始・終了時刻を入れると、時給換算が表示されます。</span>';
-  const { medals, cash } = draftValues(draft);
+  const { medals, cash } = draftValues(draft, balanceBefore(vm, draft));
   const hourly = perHour(txProfit({ medals, cash }, store?.exchangeRate), mins);
   return `
     <div>稼働 <strong data-testid="work-duration">${duration(mins)}</strong>・時給換算 <strong class="${tone(hourly)}" data-testid="work-preview-hourly">${signedYen(roundYen(hourly, vm.method))}</strong></div>
@@ -270,6 +283,20 @@ export function recordView(vm, draft) {
         </div>
       </fieldset>
 
+      <div class="seg2" role="group" aria-label="枚数の入力方法">
+        <button type="button" class="${draft.inputMode !== 'balance' ? 'on' : ''}" aria-pressed="${draft.inputMode !== 'balance'}" data-action="input-mode" data-mode="diff">増減で入力</button>
+        <button type="button" class="${draft.inputMode === 'balance' ? 'on' : ''}" aria-pressed="${draft.inputMode === 'balance'}" data-action="input-mode" data-mode="balance">残高で入力</button>
+      </div>
+      ${draft.inputMode === 'balance' ? `
+      <div class="field">
+        <label class="field-label" for="rec-balance">保存後の貯メダル残高（レシート・台の表示）</label>
+        <div class="amount-row">
+          <input id="rec-balance" class="amount-input" name="balanceAfter" type="number" inputmode="numeric" min="0" step="1" placeholder="${balanceBefore(vm, draft)}" value="${v('balanceAfter')}">
+          <span class="unit">枚</span>
+        </div>
+        <div class="preview" id="rec-preview" aria-live="polite">${recordPreview(vm, draft)}</div>
+        <p class="hint">今の残高との差が、増減枚数として記録されます。</p>
+      </div>` : `
       <div class="field">
         <div class="label-row">
           <label class="field-label" for="rec-medals">増減枚数</label>
@@ -286,7 +313,7 @@ export function recordView(vm, draft) {
       <div class="quick" data-testid="quick">
         ${QUICK.map((q) => `<button type="button" class="qbtn pos" data-action="quick" data-v="${q}">+${num(q)}</button>`).join('')}
         ${QUICK.map((q) => `<button type="button" class="qbtn neg" data-action="quick" data-v="${-q}">-${num(q)}</button>`).join('')}
-      </div>
+      </div>`}
 
       <fieldset class="field">
         <legend class="field-label">理由</legend>
@@ -308,6 +335,7 @@ export function recordView(vm, draft) {
           <div class="field"><label class="field-label" for="rec-start-time">開始時刻</label><input id="rec-start-time" name="startTime" type="time" value="${v('startTime')}"></div>
           <div class="field"><label class="field-label" for="rec-time">終了時刻</label><input id="rec-time" name="time" type="time" value="${v('time')}"></div>
         </div>
+        ${draft.high !== '' && draft.high != null ? `<div class="carry" data-testid="carry-high">実戦カウンターの推定：設定4以上の可能性 <strong>${esc(draft.high)}%</strong><button type="button" class="link-btn" data-action="clear-high">外す</button></div>` : ''}
         <div class="field"><label class="field-label" for="rec-ev">期待値（円）</label>
           <input id="rec-ev" name="expectedValue" type="number" step="1" placeholder="例：3000（設定推測やツールで出した値）" value="${v('expectedValue')}"></div>
         <div class="work-preview" id="rec-work" aria-live="polite">${workPreview(vm, draft)}</div>
@@ -505,6 +533,7 @@ export function diagnosisView(vm, st) {
       ${groupTable('機種別', d.byMachine.slice(0, 10), method, { id: 'diag-machine' })}
       ${groupTable('曜日別', d.byWeekday, method, { id: 'diag-weekday', hourly: false })}
       ${groupTable('打ち始めの時間帯別', d.byBand, method, { id: 'diag-band', note: '開始時刻を入れた記録だけで集計します。' })}
+      ${groupTable('実戦カウンターの推定別', d.byHigh, method, { id: 'diag-high', note: '小役カウンターから「この台の結果を記録する」で記録した台の、設定4以上の可能性ごとの成績です。' })}
       ${vm.data.stores.length > 1 ? groupTable('店舗別', d.byStore, method, { id: 'diag-store' }) : ''}
       ${workCard(vm.work(d.sessions), method, '時給・期待値')}
       <p class="disclaimer">※ 収支は貯メダルの円換算 + 現金です。過去の記録の集計で、今後の結果を保証するものではありません。</p>
@@ -688,6 +717,7 @@ export function judgeResult(vm, js) {
         <div><dt>推奨ヤメライン</dt><dd data-testid="quit-line">${quit}</dd></div>
         ${quitNote ? `<p class="hint kv-note">${quitNote}</p>` : ''}
         <div><dt>最大追加投資</dt><dd data-testid="max-add">${r.maxAdd == null ? '<span class="muted">上限未設定</span>' : `${num(r.maxAdd)}枚`}</dd></div>
+        ${r.replayLeft != null ? `<div><dt>再プレイ</dt><dd data-testid="replay-left">今日あと ${num(r.replayLeft)}枚まで</dd></div>` : ''}
         ${r.evRest != null ? `<div><dt>現在期待値</dt><dd data-testid="ev-rest"><span class="${tone(r.evRest)}">${signedYen(roundYen(r.evRest, vm.method))}</span><small>（閉店まで約${num(r.remainingGames)}G）</small></dd></div>` : ''}
         ${r.evPerGame != null ? `<div><dt>推定機械割</dt><dd>${r.rate.toFixed(1)}%（1G ${signed(Math.round(r.evPerGame * 10) / 10)}円）</dd></div>` : ''}
       </dl>
@@ -737,6 +767,7 @@ export function storesView(vm) {
             <h2 class="store-name">${r.store.favorite ? icon('star', 'fav') : ''}${esc(r.store.name)}</h2>
             <span class="muted">${rateLabel(r.store)}</span>
           </div>
+          ${r.store.replayLimit || r.store.replayFee ? `<div class="store-replay" data-testid="store-replay">再プレイ${r.store.replayLimit ? ` 上限 ${num(r.store.replayLimit)}枚/日` : ''}${r.store.replayLimit && r.store.replayFee ? '・' : ' '}${r.store.replayFee ? `手数料 ${+r.store.replayFee}%` : ''}</div>` : ''}
           <div class="store-nums">
             <span class="store-medals">${num(r.medals)}<small>枚</small></span>
             <span class="store-yen">${yen(r.yen)}相当</span>
@@ -782,6 +813,13 @@ export function storeFormView(vm, store) {
         <div class="unit-input"><input id="st-medals" name="medals" type="number" inputmode="numeric" min="0" step="1" placeholder="0" value="${medals}"><span>枚</span></div>
         <div class="preview" id="store-preview">${storePreview(medals, s.exchangeRate, vm.method)}</div>
         ${editing ? '<p class="hint">枚数を変えると、差分を「その他（残高を修正）」として記録します。</p>' : ''}</div>
+      <div class="grid2">
+        <div class="field"><label class="field-label" for="st-replay-limit">再プレイ上限（任意）</label>
+          <div class="unit-input"><input id="st-replay-limit" name="replayLimit" type="number" inputmode="numeric" min="0" step="100" placeholder="なし" value="${s.replayLimit || ''}"><span>枚/日</span></div></div>
+        <div class="field"><label class="field-label" for="st-replay-fee">再プレイ手数料（任意）</label>
+          <div class="unit-input"><input id="st-replay-fee" name="replayFee" type="number" inputmode="decimal" min="0" max="50" step="any" placeholder="なし" value="${s.replayFee || ''}"><span>%</span></div></div>
+      </div>
+      <p class="hint">1日に再プレイできる枚数の上限や手数料がある店舗は入れておくと、続行・ヤメ判断の「最大追加投資」に反映されます。</p>
       <label class="switch"><input type="checkbox" name="favorite" ${s.favorite ? 'checked' : ''}><span>お気に入りの店舗（記録画面で先頭に表示）</span></label>
       <div class="field"><label class="field-label" for="st-memo">メモ</label>
         <textarea id="st-memo" name="memo" rows="2" maxlength="500" placeholder="営業時間・貯メダルの再プレイ上限など">${esc(s.memo)}</textarea></div>
@@ -839,6 +877,18 @@ export function settingsView(vm, env) {
               ? 'Safari の共有ボタン（□↑）→「ホーム画面に追加」で、アプリのように使えます。'
               : 'ブラウザのメニュー →「ホーム画面に追加」または「アプリをインストール」で、アプリのように使えます。'}</p>`}
           <p class="hint">ホーム画面から開くと、電波がない店内でも記録できます。</p>
+        </div>
+      </section>
+
+      <section class="section"><h2>遊びすぎ防止</h2>
+        <div class="card">
+          <div class="grid2">
+            <div class="field"><label class="field-label" for="set-month-loss">月の負けの上限</label>
+              <div class="unit-input"><input id="set-month-loss" name="monthlyLossLimit" type="number" inputmode="numeric" min="0" step="1000" placeholder="なし" value="${settings.monthlyLossLimit || ''}"><span>円</span></div></div>
+            <div class="field"><label class="field-label" for="set-week-hours">1週間の稼働時間の目安</label>
+              <div class="unit-input"><input id="set-week-hours" name="weeklyHoursLimit" type="number" inputmode="decimal" min="0" step="1" placeholder="なし" value="${settings.weeklyHoursLimit || ''}"><span>時間</span></div></div>
+          </div>
+          <p class="hint">今月の負けが上限の8割をこえるとホームでお知らせし、上限に達すると続行・ヤメ判断が「ヤメ推奨」になります。稼働時間は、開始・終了時刻を入れた記録で数えます。</p>
         </div>
       </section>
 

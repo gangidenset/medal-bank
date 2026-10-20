@@ -676,3 +676,23 @@ body[data-route="counter"] .toast { bottom: calc(76px + var(--safe-b)); }
 @keyframes slideup { from { transform: translate(-50%, 100%); } to { transform: translate(-50%, 0); } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .sheet, .sheet-backdrop { animation: none; } }
+
+/* ---- v1.6：残高で入力・引き継ぎ・お知らせ・更新 ---- */
+.seg2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 14px; background: var(--surface-2); }
+.seg2 button { min-height: 44px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); font-size: 15px; font-weight: 700; cursor: pointer; }
+.seg2 button.on { background: var(--surface); color: var(--accent); box-shadow: var(--shadow); }
+.preview-diff { font-size: 15px; }
+.preview-diff strong { font-size: 20px; font-weight: 800; }
+.carry { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 14px; padding: 8px 12px; border-radius: 12px; background: var(--accent-soft); }
+.carry .link-btn { margin-left: auto; min-height: 32px; }
+.notice.warn { background: var(--warn-bg); color: var(--warn); font-weight: 700; }
+.notice.bad { background: color-mix(in srgb, var(--neg) 16%, var(--surface)); color: var(--neg); font-weight: 700; }
+.store-replay { font-size: 13px; color: var(--muted); margin-top: 2px; }
+#update-bar {
+  position: fixed; z-index: 70; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 8px); transform: translateX(-50%);
+  width: min(528px, calc(100% - 24px)); display: flex; align-items: center; gap: 10px;
+  padding: 8px 8px 8px 16px; border-radius: 14px; background: #1f2330; color: #fff; font-weight: 700;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 25%); animation: fade .2s;
+}
+#update-bar span { flex: 1; }
+#update-bar button { min-height: 40px; padding: 0 16px; border: 0; border-radius: 10px; background: #8f88ff; color: #0e1015; font-weight: 800; cursor: pointer; }

@@ -133,3 +133,18 @@ test('BIG も単独・チェリー重複に分けられる。チェリーBIG の
   // 判定の合算は内訳の合計で計算する
   assert.equal(judge({ ...base, machine: MY, counts: { games: 3200, bbSolo: 10, bbCherry: 6, rb: 16, splitBb: true } }).combined, 100);
 });
+
+test('再プレイ：上限と手数料で最大追加投資が減り、上限に達したらヤメ。月の上限でもヤメ', () => {
+  const counts = { games: 3000, bb: 16, rb: 18 };
+  const r = judge({ ...base, counts, todayMedals: -1000, stock: 3000, replayLimit: 2500, replayFee: 10 });
+  assert.equal(r.replayLeft, 1500); // 2,500 − 今日の負け 1,000
+  assert.equal(r.maxAdd, 1500); // 手数料10%で使える貯メダルは 2,700 → 上限の 1,500 が先
+  const fee = judge({ ...base, counts, stock: 1000, replayFee: 10 });
+  assert.equal(fee.maxAdd, 900);
+  const over = judge({ ...base, counts, todayMedals: -2500, replayLimit: 2500 });
+  assert.equal(over.verdict, 'stop');
+  assert.match(over.reasons[0], /再プレイの上限/);
+  const month = judge({ ...base, counts, monthLossOver: true });
+  assert.equal(month.verdict, 'stop');
+  assert.match(month.reasons[0], /月の上限/);
+});

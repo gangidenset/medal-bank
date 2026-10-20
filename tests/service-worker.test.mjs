@@ -9,12 +9,19 @@ const source = await readFile(new URL('../www/service-worker.js', import.meta.ur
 
 function createWorker({ online }) {
   const stores = new Map();
+  const reloads = [];
   const cacheFor = (name) => {
     if (!stores.has(name)) stores.set(name, new Map());
     const store = stores.get(name);
     const key = (req) => new URL(typeof req === 'string' ? req : req.url, ORIGIN + '/').href.split('?')[0];
     return {
-      async addAll(urls) { for (const u of urls) store.set(key(u), new Response(`cached:${u}`)); },
+      async addAll(urls) {
+        for (const u of urls) {
+          if (typeof u !== 'string') reloads.push(u.cache);
+          const label = typeof u === 'string' ? u : `.${new URL(u.url).pathname}`;
+          store.set(key(u), new Response(`cached:${label}`));
+        }
+      },
       async put(req, res) { store.set(key(req), res); },
       async match(req) { return store.get(key(req))?.clone(); },
     };
@@ -39,7 +46,7 @@ function createWorker({ online }) {
       if (!net.online) throw new TypeError('Failed to fetch');
       return new Response(`network:${new URL(req.url).pathname}`);
     },
-    URL, Response, Promise, setTimeout, clearTimeout, Error,
+    URL, Request, Response, Promise, setTimeout, clearTimeout, Error,
   };
   vm.runInNewContext(source, context);
 
@@ -50,7 +57,7 @@ function createWorker({ online }) {
     return done;
   };
   const request = (path, mode = 'cors') => ({ url: ORIGIN + path, method: 'GET', mode });
-  return { run, request, net, stores };
+  return { run, request, net, stores, reloads };
 }
 
 
@@ -92,4 +99,11 @@ test('SHELL に書いたファイルがすべて存在する', async () => {
   const list = [...source.matchAll(/'\.\/([^']*)'/g)].map((m) => m[1]).filter(Boolean);
   assert.ok(list.length > 10);
   for (const p of list) await access(new URL(`../www/${p}`, import.meta.url));
+});
+
+test('インストール時は HTTP キャッシュを使わず、必ず最新のファイルを取ってくる', async () => {
+  const sw = createWorker({ online: true });
+  await sw.run('install');
+  assert.ok(sw.reloads.length > 10);
+  assert.ok(sw.reloads.every((c) => c === 'reload'));
 });

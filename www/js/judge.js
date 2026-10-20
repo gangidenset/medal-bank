@@ -108,16 +108,22 @@ const toMin = (s) => Number(s.slice(0, 2)) * 60 + Number(s.slice(3, 5));
  * @param {string} p.now, p.closingTime  'HH:MM'
  * @param {number} p.yenPerMedal
  */
-export function judge({ machine, counts, priorId = 'normal', todayMedals = 0, lossLimit = 0, stock = null, now, closingTime = '22:45', yenPerMedal = 20 }) {
+export function judge({
+  machine, counts, priorId = 'normal', todayMedals = 0, lossLimit = 0, stock = null, now, closingTime = '22:45', yenPerMedal = 20,
+  replayLimit = 0, replayFee = 0, monthLossOver = false,
+}) {
   const games = counts.games || 0;
   const bonus = totalBb(counts) + totalRb(counts);
   const todayLoss = Math.max(0, -todayMedals);
   const limitLeft = lossLimit > 0 ? Math.max(0, lossLimit - todayLoss) : null;
-  const caps = [limitLeft, stock == null ? null : Math.max(0, stock)].filter((v) => v != null);
+  // 再プレイの上限：今日の負け分はすでに再プレイしたものとみなす。手数料があると使える枚数が減る
+  const replayLeft = replayLimit > 0 ? Math.max(0, replayLimit - todayLoss) : null;
+  const usableStock = stock == null ? null : Math.floor(Math.max(0, stock) * (1 - (replayFee || 0) / 100));
+  const caps = [limitLeft, usableStock, replayLeft].filter((v) => v != null);
   const maxAdd = caps.length ? Math.min(...caps) : null;
   const remainingMinutes = Math.max(0, toMin(closingTime) - toMin(now));
   const remainingGames = Math.round((remainingMinutes * GAMES_PER_HOUR) / 60);
-  const r = { games, todayLoss, maxAdd, remainingGames, reasons: [], combined: bonus > 0 ? games / bonus : null };
+  const r = { games, todayLoss, maxAdd, replayLeft, remainingGames, reasons: [], combined: bonus > 0 ? games / bonus : null };
   const valid = usedCategoriesTotal(machine, counts) <= games;
 
   if (machine && valid) {
@@ -130,9 +136,15 @@ export function judge({ machine, counts, priorId = 'normal', todayMedals = 0, lo
     r.breakEven = breakEvenGames(machine, counts, prior);
   }
 
-  if (lossLimit > 0 && todayLoss >= lossLimit) {
+  if (monthLossOver) {
+    r.verdict = 'stop';
+    r.reasons.push('今月の負けが、決めておいた月の上限に達しています。今月はここまでにしましょう。');
+  } else if (lossLimit > 0 && todayLoss >= lossLimit) {
     r.verdict = 'stop';
     r.reasons.push(`今日の負けが、決めておいた上限（${lossLimit.toLocaleString('ja-JP')}枚）に達しています。`);
+  } else if (replayLeft === 0) {
+    r.verdict = 'stop';
+    r.reasons.push(`今日の再プレイの上限（${replayLimit.toLocaleString('ja-JP')}枚）に達しています。`);
   } else if (remainingGames <= 0) {
     r.verdict = 'stop';
     r.reasons.push('閉店時刻になりました。');

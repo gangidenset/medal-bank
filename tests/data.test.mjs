@@ -120,9 +120,9 @@ test('CSV：BOM 付き、カンマや改行を含む値はクォート', async (
   const csv = data.exportCSV();
   assert.ok(csv.startsWith('﻿日付,時刻,店舗,理由,増減枚数,円換算'));
   const rows = csv.slice(1).split('\r\n');
-  assert.equal(rows[1], '2026-10-19,,店舗A,遊技結果,-800,-14545,0,,,,,,,,,,,,,"a,b\n""c"""');
+  assert.equal(rows[1], '2026-10-19,,店舗A,遊技結果,-800,-14545,0,,,,,,,,,,,,,,"a,b\n""c"""');
   // 3時間30分で +21,818円 → 時給換算 6,233円
-  assert.equal(rows[2], '2026-10-20,13:30,店舗A,遊技結果,1200,21818,0,アイムジャグラー,290,,,,,10:00,210,3500,6233,Aタイプ,,');
+  assert.equal(rows[2], '2026-10-20,13:30,店舗A,遊技結果,1200,21818,0,アイムジャグラー,290,,,,,10:00,210,3500,6233,Aタイプ,,,');
 });
 
 test('期待値・稼働時間を保存。おかしな値は捨てる', async () => {
@@ -132,8 +132,26 @@ test('期待値・稼働時間を保存。おかしな値は捨てる', async ()
     storeId: s.id, date: '2026-10-01', time: '13:00', medals: 500,
     detail: { startTime: '10:00', minutes: 180, expectedValue: -1500 },
   });
-  assert.deepEqual(t.detail, { startMedals: null, endMedals: null, investment: null, payout: null, expectedValue: -1500, minutes: 180, games: null, startTime: '10:00' });
+  assert.deepEqual(t.detail, { startMedals: null, endMedals: null, investment: null, payout: null, expectedValue: -1500, minutes: 180, games: null, high: null, startTime: '10:00' });
   const u = await data.addTransaction({ storeId: s.id, date: '2026-10-01', medals: 1, detail: { startTime: 'xx', minutes: 9999 } });
   assert.equal(u.detail, null);
   await assert.rejects(data.addTransaction({ storeId: s.id, date: '2026-10-01', medals: 1, detail: { expectedValue: 'abc' } }), /遊技記録/);
 });
+
+test('店舗の再プレイ上限・手数料、記録の推定（設定4以上の%）、遊びすぎ防止の設定', async () => {
+  const { data } = await setup();
+  const s = await data.addStore({ name: 'A', replayLimit: '2500', replayFee: '10' });
+  expect(s.replayLimit, 2500);
+  expect(s.replayFee, 10);
+  await assert.rejects(data.addStore({ name: 'B', replayFee: 80 }), /手数料/);
+  const t = await data.addTransaction({ storeId: s.id, date: '2026-10-01', medals: 100, detail: { high: 74 } });
+  expect(t.detail.high, 74);
+  const u = await data.addTransaction({ storeId: s.id, date: '2026-10-01', medals: 100, detail: { high: 140, games: 10 } });
+  expect(u.detail.high, null); // 0〜100 以外は捨てる
+  await data.updateSettings({ monthlyLossLimit: 50000, weeklyHoursLimit: 12.5, recordInputMode: 'balance' });
+  assert.deepEqual([data.settings.monthlyLossLimit, data.settings.weeklyHoursLimit, data.settings.recordInputMode], [50000, 12.5, 'balance']);
+  await data.updateSettings({ recordInputMode: 'xxx', weeklyHoursLimit: -1 });
+  assert.deepEqual([data.settings.recordInputMode, data.settings.weeklyHoursLimit], ['diff', 0]); // おかしな値は初期値に戻す
+});
+
+function expect(actual, expected) { assert.equal(actual, expected); }

@@ -36,6 +36,14 @@ const bandOf = (startTime) => {
   return h >= 18 ? 'night' : h >= 12 ? 'day' : 'morning';
 };
 
+/** 実戦カウンターで推定した「設定4以上の可能性」で分ける */
+export const HIGH_BANDS = [
+  { id: 'high', label: '設定4以上 60%以上' },
+  { id: 'mid', label: '30〜60%' },
+  { id: 'low', label: '30%未満' },
+];
+const highBandOf = (h) => (h == null ? null : h >= 60 ? 'high' : h >= 30 ? 'mid' : 'low');
+
 /** 遊技の記録（＝1回の稼働）だけを対象にする */
 export const isSession = (t) => t.type === 'play';
 
@@ -95,10 +103,12 @@ export function diagnose(stores, transactions, { from = '0000-00-00', to = '9999
   const byBand = groupBy(items, (i) => (i.t.detail?.startTime ? bandOf(i.t.detail.startTime) : null), (k) => BANDS.find((b) => b.id === k).label)
     .sort((a, b) => BANDS.findIndex((x) => x.id === a.key) - BANDS.findIndex((x) => x.id === b.key));
   const byStore = groupBy(items, (i) => i.t.storeId, (k) => storeMap.get(k).name).sort(byProfit);
+  const byHigh = groupBy(items, (i) => highBandOf(i.t.detail?.high), (k) => HIGH_BANDS.find((b) => b.id === k).label)
+    .sort((a, b) => HIGH_BANDS.findIndex((x) => x.id === a.key) - HIGH_BANDS.findIndex((x) => x.id === b.key));
   const ev = items.filter((i) => i.t.detail?.expectedValue != null);
   const evSum = ev.reduce((a, i) => a + i.t.detail.expectedValue, 0);
   const evActual = ev.reduce((a, i) => a + i.profit, 0);
-  const result = { overall, byType, byMachine, byWeekday, byBand, byStore, sessions: items.map((i) => i.t), ev: { count: ev.length, sum: evSum, actual: evActual } };
+  const result = { overall, byType, byMachine, byWeekday, byBand, byStore, byHigh, sessions: items.map((i) => i.t), ev: { count: ev.length, sum: evSum, actual: evActual } };
   result.insights = buildInsights(result);
   return result;
 }
@@ -108,7 +118,7 @@ const hourText = (g) => (g.hourly == null ? '' : `・時給 ${yenText(g.hourly)}
 const rateText = (r) => `${(Math.round(r * 10) / 10).toFixed(1)}%`;
 
 /** 診断のコメント。tone: good（得意）/ bad（苦手・注意）/ info */
-export function buildInsights({ overall, byType, byMachine, byWeekday, byBand, ev }) {
+export function buildInsights({ overall, byType, byMachine, byWeekday, byBand, byHigh = [], ev }) {
   const out = [];
   if (overall.count < MIN_SAMPLES) return out;
   const enough = (list) => list.filter((g) => g.count >= MIN_SAMPLES);
@@ -158,6 +168,17 @@ export function buildInsights({ overall, byType, byMachine, byWeekday, byBand, e
         detail: `期待値の合計 ${yenText(ev.sum)} → 実際 ${yenText(ev.actual)}（${ev.count}回）${diff < 0 ? '。期待値プラスの台を打ち続ければ収束していきます。' : ''}`,
       });
     }
+  }
+
+  // 実戦カウンターの推定（設定4以上の可能性）別
+  const hi = byHigh.find((g) => g.key === 'high');
+  const lo = byHigh.find((g) => g.key === 'low');
+  if (hi && lo && hi.count >= 2 && lo.count >= 2 && lo.profit < 0 && hi.profit > lo.profit) {
+    out.push({
+      tone: 'info',
+      text: `設定4以上の可能性が低い台で ${yenText(lo.profit)} 負けています。`,
+      detail: `可能性が高い台：${yenText(hi.profit)}（${hi.count}回）／低い台：${yenText(lo.profit)}（${lo.count}回）。低い台は早めに見切ると成績が上がります。`,
+    });
   }
 
   if (overall.hourly != null && overall.minutes >= 600 && overall.hourly < 0) {

@@ -16,7 +16,7 @@ import { pendingNotices } from './notify.js';
 import { limit } from './plan.js';
 import * as ui from './ui.js';
 
-const VERSION = '1.5.1';
+const VERSION = '1.6.0';
 const STORAGE_LABELS = {
   indexeddb: 'この端末（IndexedDB）',
   localstorage: 'この端末（localStorage）',
@@ -41,7 +41,7 @@ const COUNT_KEYS = ['bb', 'bbSolo', 'bbCherry', 'rb', 'rbSolo', 'rbCherry', 'gra
 let judgeState = loadJudgeState();
 
 function loadJudgeState() {
-  const base = { machineId: 'im-ex', storeId: null, games: '', today: '', splitBb: false, splitRb: false, countSmall: true, optsOpen: false, history: [], minusMode: false, result: null };
+  const base = { machineId: 'im-ex', storeId: null, games: '', today: '', startTime: '', splitBb: false, splitRb: false, countSmall: true, optsOpen: false, history: [], minusMode: false, result: null };
   for (const k of COUNT_KEYS) base[k] = 0;
   try {
     const saved = JSON.parse(localStorage.getItem(JUDGE_KEY) ?? 'null');
@@ -95,6 +95,9 @@ function buildVM() {
       get: () => pendingNotices({
         stores: data.stores, transactions: data.transactions, totalMedals: pf.totalMedals,
         targetMedals: data.settings.targetMedals, today,
+        monthProfit: vm.month.profit,
+        monthlyLossLimit: data.settings.monthlyLossLimit,
+        weeklyHoursLimit: data.settings.weeklyHoursLimit,
       }),
     },
     machines: { get: () => [...new Set(data.transactions.map((t) => t.machine).filter(Boolean))].slice(0, 30) },
@@ -110,7 +113,8 @@ function newDraft() {
   const d = {
     editId: null, storeId, medals: '', type: 'play', payout: '', investment: '',
     date: dateStr(now), time: timeStr(now), startTime: '', expectedValue: '', machine: '', machineNumber: '', memo: '',
-    machineType: '', games: '',
+    machineType: '', games: '', high: '',
+    inputMode: data.settings.recordInputMode, balanceAfter: '',
     detailOpen: data.settings.recordDetailOpen, playMode: false, startMedals: '', endMedals: '',
   };
   // 実戦カウンターの「この台の結果を記録する」から来たときは、機種・G数などを引き継ぐ
@@ -132,7 +136,8 @@ function draftFromTx(t) {
     payout: s(payout), investment: s(investment), date: t.date, time: t.time,
     startTime: d.startTime ?? '', expectedValue: s(d.expectedValue),
     machine: t.machine, machineNumber: t.machineNumber, memo: t.memo,
-    machineType: t.machineType ?? '', games: s(d.games),
+    machineType: t.machineType ?? '', games: s(d.games), high: s(d.high),
+    inputMode: 'diff', balanceAfter: '',
     detailOpen: t.type !== 'exchange' && Boolean(t.machine || t.machineNumber || t.memo || t.cash || d.startMedals != null || d.startTime || d.expectedValue != null || d.games != null),
     playMode: d.startMedals != null || d.endMedals != null,
     startMedals: s(d.startMedals), endMedals: s(d.endMedals),
@@ -225,6 +230,17 @@ function rerenderRecord() {
   main.innerHTML = ui.recordView(buildVM(), draft);
 }
 
+// ---- 新しいバージョンのお知らせ ----
+
+function showUpdateBar() {
+  if (document.getElementById('update-bar')) return;
+  const bar = document.createElement('div');
+  bar.id = 'update-bar';
+  bar.setAttribute('role', 'status');
+  bar.innerHTML = '<span>新しいバージョンがあります</span><button type="button" data-action="app-reload">更新</button>';
+  document.body.append(bar);
+}
+
 // ---- 使い方ガイド ----
 
 function openGuide(key) {
@@ -285,7 +301,16 @@ function computeJudge() {
     now: timeStr(new Date()),
     closingTime: s.closingTime,
     yenPerMedal: store ? yenPerMedal(store.exchangeRate) : 20,
+    replayLimit: store?.replayLimit ?? 0,
+    replayFee: store?.replayFee ?? 0,
+    monthLossOver: s.monthlyLossLimit > 0 && -monthStats(data.stores, data.transactions, monthOf(dateStr(new Date()))).profit >= s.monthlyLossLimit,
   });
+}
+
+/** 数え始めた時刻を覚えておく（「この台の結果を記録する」で開始時刻として使う） */
+function markCounterStart() {
+  if (judgeState.startTime) return;
+  judgeState.startTime = timeStr(new Date());
 }
 
 /** 入力中はフォーカスを保つため、結果と数字の部分だけ書き換える */
@@ -423,6 +448,14 @@ const actions = {
     updateTypeChips();
   },
   'diag-range': (el) => { diagState.range = el.dataset.id; render(); },
+  'input-mode': (el) => {
+    draft.inputMode = el.dataset.mode;
+    data.updateSettings({ recordInputMode: draft.inputMode }, { silent: true }).catch(fail);
+    rerenderRecord();
+    document.getElementById(draft.inputMode === 'balance' ? 'rec-balance' : 'rec-medals')?.focus();
+  },
+  'clear-high': () => { draft.high = ''; rerenderRecord(); },
+  'app-reload': () => location.reload(),
   count: (el) => {
     const k = el.dataset.key;
     const before = Number(judgeState[k]) || 0;
@@ -430,6 +463,7 @@ const actions = {
     if (before + d < 0) return;
     judgeState[k] = before + d;
     judgeState.history.push([k, d]);
+    markCounterStart();
     navigator.vibrate?.(judgeState.minusMode ? [8, 40, 8] : 10);
     // 押した感触：数字を一瞬はずませる
     el.classList.remove('bump');
@@ -478,6 +512,7 @@ const actions = {
     judgeState.minusMode = false;
     judgeState.games = '';
     judgeState.today = '';
+    judgeState.startTime = '';
     saveJudgeState();
     render();
   },
@@ -491,6 +526,8 @@ const actions = {
       machine: machine?.name ?? '',
       machineType: machine ? 'a' : '',
       games: judgeState.games,
+      startTime: judgeState.startTime || '',
+      high: judgeState.result?.posterior ? String(Math.round(judgeState.result.high * 100)) : '',
       memo: `${bb}・${rb}${judgeState.countSmall && (judgeState.grape || judgeState.cherry) ? `・ブドウ ${judgeState.grape}・チェリー ${judgeState.cherry}` : ''}`,
       detailOpen: true,
     };
@@ -581,7 +618,7 @@ function updateStorePreview() {
   el.innerHTML = ui.storePreview(document.getElementById('st-medals').value, document.getElementById('st-exchange').value, data.settings.roundingMethod);
 }
 
-const DRAFT_FIELDS = new Set(['medals', 'payout', 'investment', 'date', 'time', 'startTime', 'expectedValue', 'machine', 'machineNumber', 'memo', 'startMedals', 'endMedals', 'games']);
+const DRAFT_FIELDS = new Set(['medals', 'payout', 'investment', 'date', 'time', 'startTime', 'expectedValue', 'machine', 'machineNumber', 'memo', 'startMedals', 'endMedals', 'games', 'balanceAfter']);
 
 function onInput(e) {
   const t = e.target;
@@ -606,6 +643,7 @@ function onInput(e) {
     updateStorePreview();
   } else if (t.form?.id === 'judge-form' && (t.name === 'games' || t.name === 'today')) {
     judgeState[t.name] = t.value;
+    if (t.name === 'games' && t.value) markCounterStart();
     refreshJudge();
   }
 }
@@ -626,6 +664,13 @@ async function onChange(e) {
     if (t.name === 'theme') {
       await data.updateSettings({ theme: t.value });
       applyTheme();
+    } else if (t.name === 'monthlyLossLimit' || t.name === 'weeklyHoursLimit') {
+      const v = t.value === '' ? 0 : Number(t.value);
+      if (!(v >= 0)) throw new ValidationError('0 以上の数を入力してください');
+      await data.updateSettings({ [t.name]: v }, { silent: true });
+      toast(t.name === 'monthlyLossLimit'
+        ? (v ? `月の負けの上限を ${ui.num(v)}円 にしました` : '月の負けの上限を解除しました')
+        : (v ? `1週間の稼働時間の目安を ${v}時間 にしました` : '稼働時間の目安を解除しました'));
     } else if (t.name === 'roundingMethod') {
       await data.updateSettings({ roundingMethod: t.value });
       toast('円換算の端数処理を変更しました');
@@ -675,7 +720,10 @@ async function onChange(e) {
 }
 
 async function saveRecord() {
-  const { medals, cash } = ui.draftValues(draft);
+  if (draft.inputMode === 'balance' && draft.balanceAfter === '' && !draft.investment && !draft.payout) {
+    throw new ValidationError('保存後の貯メダル残高を入力してください');
+  }
+  const { medals, cash } = ui.draftValues(draft, ui.balanceBefore(buildVM(), draft));
   const n = (k) => (draft[k] === '' || draft[k] == null ? null : Number(draft[k]));
   const minutes = playMinutes(draft.startTime, draft.time);
   const detail = {
@@ -687,6 +735,7 @@ async function saveRecord() {
     startTime: minutes ? draft.startTime : null,
     minutes,
     games: n('games'),
+    high: n('high'),
   };
   const input = {
     storeId: draft.storeId, type: draft.type, medals, cash, date: draft.date, time: draft.time,
@@ -720,6 +769,7 @@ async function saveStore(form) {
   const input = {
     name: f.get('name'), lendingRate: f.get('lendingRate'), exchangeRate: f.get('exchangeRate'),
     favorite: f.get('favorite') === 'on', memo: f.get('memo'),
+    replayLimit: f.get('replayLimit') ?? 0, replayFee: f.get('replayFee') ?? 0,
   };
   const medals = f.get('medals') === '' ? 0 : Number(f.get('medals'));
   if (!Number.isInteger(medals) || medals < 0) throw new ValidationError('貯メダルは 0 以上の整数で入力してください');
@@ -842,7 +892,18 @@ async function init() {
 
   // オフライン対応（ネイティブアプリ版では不要なので登録しない）
   if ('serviceWorker' in navigator && location.protocol.startsWith('http') && !window.Capacitor) {
-    navigator.serviceWorker.register('./service-worker.js').catch(() => {});
+    // 新しいバージョンが入ったら（2回目以降の起動のとき）「更新」ボタンを出す
+    let hadController = Boolean(navigator.serviceWorker.controller);
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (hadController) showUpdateBar();
+      hadController = true;
+    });
+    navigator.serviceWorker.register('./service-worker.js').then((reg) => {
+      // 店で開きっぱなしでも、アプリに戻ってきたときに新しいバージョンを確認する
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
+      });
+    }).catch(() => {});
   }
 }
 
