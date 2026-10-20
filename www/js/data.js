@@ -4,6 +4,8 @@
 // クラウド同期に備えて、すべてのレコードに id（UUID）・createdAt・updatedAt を持たせ、
 // 削除は deletedAt を入れる「論理削除」にしている（同期時に削除を相手に伝えられるように）。
 
+import { MACHINE_TYPES, guessMachineType, machineTypeLabel } from './analysis.js';
+import { normalizeSpec } from './machines.js';
 import { TX_TYPES, applySign, isValidDate, medalsToYen, perHour, roundYen, storeBalance, txProfit, typeLabel } from './calculation.js';
 
 export const APP_ID = 'medal-bank';
@@ -14,6 +16,10 @@ export const DEFAULT_SETTINGS = {
   roundingMethod: 'floor', // floor（切り捨て）| round（四捨五入）| ceil（切り上げ）
   lastStoreId: null,
   recordDetailOpen: false, // 記録画面の「詳しく入力」を開いた状態で始める
+  dailyLossLimit: 0, // ヤメ判断：1日の負けの上限（枚、0 = 決めていない）
+  closingTime: '22:45', // ヤメ判断：閉店時刻
+  judgePrior: 'normal', // ヤメ判断：店の状況（normal | event | flat）
+  customMachines: [], // 利用者が編集・追加した機種スペック（machines.js の形）
 };
 
 export class ValidationError extends Error {}
@@ -89,8 +95,10 @@ export function normalizeTransaction(input, prev = null, storeIds = null) {
       payout: optInt(d.payout),
       expectedValue: optInt(d.expectedValue),
       minutes: optInt(d.minutes),
+      games: optInt(d.games),
     };
     if (Object.values(detail).some((v) => v !== null && !Number.isFinite(v))) throw new ValidationError('遊技記録の数を正しく入力してください');
+    if (detail.games !== null && !(detail.games >= 0 && detail.games <= 100000)) throw new ValidationError('ゲーム数を正しく入力してください');
     if (detail.expectedValue !== null && Math.abs(detail.expectedValue) > MAX_YEN) throw new ValidationError('期待値を正しく入力してください');
     if (detail.minutes !== null && !(detail.minutes > 0 && detail.minutes <= 1440)) detail.minutes = null;
     detail.startTime = /^\d{2}:\d{2}$/.test(d.startTime ?? '') ? d.startTime : null;
@@ -106,6 +114,7 @@ export function normalizeTransaction(input, prev = null, storeIds = null) {
     cash,
     machine: text(pick('machine', ''), 60),
     machineNumber: text(pick('machineNumber', ''), 20),
+    machineType: MACHINE_TYPES.some((m) => m.id === pick('machineType')) ? pick('machineType') : '',
     memo: text(pick('memo', ''), 500),
     detail,
     createdAt: prev?.createdAt ?? (typeof input.createdAt === 'string' ? input.createdAt : nowISO()),
@@ -122,6 +131,20 @@ function normalizeSettings(input = {}) {
   if (['floor', 'round', 'ceil'].includes(input.roundingMethod)) s.roundingMethod = input.roundingMethod;
   if (typeof input.lastStoreId === 'string') s.lastStoreId = input.lastStoreId;
   s.recordDetailOpen = input.recordDetailOpen === true;
+  const loss = int(input.dailyLossLimit);
+  if (Number.isFinite(loss) && loss >= 0 && loss <= MAX_MEDALS) s.dailyLossLimit = loss;
+  if (/^\d{2}:\d{2}$/.test(input.closingTime ?? '')) s.closingTime = input.closingTime;
+  if (['normal', 'event', 'flat'].includes(input.judgePrior)) s.judgePrior = input.judgePrior;
+  if (Array.isArray(input.customMachines)) {
+    s.customMachines = input.customMachines.flatMap((m) => {
+      try {
+        const spec = normalizeSpec(m ?? {});
+        return spec.id ? [spec] : [];
+      } catch {
+        return [];
+      }
+    });
+  }
   return s;
 }
 
@@ -308,7 +331,7 @@ const csvCell = (v) => {
 export function toCSV(stores, transactions, method = 'floor') {
   const map = new Map(stores.map((s) => [s.id, s]));
   const head = ['日付', '時刻', '店舗', '理由', '増減枚数', '円換算', '現金収支', '機種', '台番号', '開始時貯メダル', '終了時貯メダル', '現金投資', '換金額',
-    '開始時刻', '稼働時間（分）', '期待値（円）', '時給換算（円）', 'メモ'];
+    '開始時刻', '稼働時間（分）', '期待値（円）', '時給換算（円）', '機種タイプ', 'ゲーム数', 'メモ'];
   const rows = [...transactions].reverse().map((t) => {
     const s = map.get(t.storeId);
     const hourly = perHour(txProfit(t, s?.exchangeRate), t.detail?.minutes);
@@ -318,6 +341,7 @@ export function toCSV(stores, transactions, method = 'floor') {
       t.machine, t.machineNumber,
       t.detail?.startMedals ?? '', t.detail?.endMedals ?? '', t.detail?.investment ?? '', t.detail?.payout ?? '',
       t.detail?.startTime ?? '', t.detail?.minutes ?? '', t.detail?.expectedValue ?? '', hourly == null ? '' : roundYen(hourly, method),
+      machineTypeLabel(t.machineType || guessMachineType(t.machine)), t.detail?.games ?? '',
       t.memo,
     ];
   });

@@ -3,16 +3,19 @@
 
 import {
   addDays, addMonths, applySign, dailySeries, dateStr, firstDate, forecast, goalProgress,
-  monthOf, monthStats, monthlySeries, playMinutes, portfolio, roundYen, summarize, timeStr, typeLabel, workStats,
+  monthOf, monthStats, monthlySeries, playMinutes, portfolio, roundYen, summarize, timeStr, typeLabel, workStats, yenPerMedal,
 } from './calculation.js';
-import { ValidationError, createDataService } from './data.js';
+import { diagnose, guessMachineType } from './analysis.js';
+import { PRIORS, judge } from './judge.js';
+import { SPEC_FIELDS, allMachines, normalizeSpec } from './machines.js';
+import { ValidationError, createDataService, newId } from './data.js';
 import { createDefaultStorage } from './storage.js';
 import { barChart, lineChart } from './chart.js';
 import { pendingNotices } from './notify.js';
 import { limit } from './plan.js';
 import * as ui from './ui.js';
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const STORAGE_LABELS = {
   indexeddb: 'この端末（IndexedDB）',
   localstorage: 'この端末（localStorage）',
@@ -28,6 +31,33 @@ let lastRoute = '';
 let installPrompt = null;
 const historyState = { month: monthOf(dateStr(new Date())), store: 'all' };
 const chartState = { range: '3m' };
+const diagState = { range: 'month' };
+let pendingDraft = null;
+
+// 実戦カウンターの状態。打っている途中で画面が閉じても消えないよう、端末内に残す
+const JUDGE_KEY = 'medalbank:judge';
+const COUNT_KEYS = ['bb', 'rb', 'rbSolo', 'rbCherry', 'grape', 'cherry'];
+let judgeState = loadJudgeState();
+
+function loadJudgeState() {
+  const base = { machineId: 'im-ex', storeId: null, games: '', today: '', splitRb: false, countSmall: false, result: null };
+  for (const k of COUNT_KEYS) base[k] = 0;
+  try {
+    const saved = JSON.parse(localStorage.getItem(JUDGE_KEY) ?? 'null');
+    if (saved && typeof saved === 'object') {
+      for (const k of Object.keys(base)) if (k !== 'result' && saved[k] !== undefined) base[k] = saved[k];
+    }
+  } catch { /* 保存できない環境ではメモリだけで動かす */ }
+  return base;
+}
+
+function saveJudgeState() {
+  try {
+    localStorage.setItem(JUDGE_KEY, JSON.stringify({ ...judgeState, result: undefined }));
+  } catch { /* 同上 */ }
+}
+
+const machineList = () => allMachines(data.settings.customMachines);
 
 // ---- 画面 ----
 
@@ -52,6 +82,10 @@ function buildVM() {
     goal: goalProgress(pf.totalMedals, data.settings.targetMedals),
     summarize: (txs) => summarize(data.stores, txs),
     work: (txs) => workStats(data.stores, txs),
+    diagnosis: (range) => {
+      const from = range === 'month' ? `${thisMonth}-01` : range === '3m' ? `${addMonths(thisMonth, -2)}-01` : undefined;
+      return diagnose(data.stores, data.transactions, { from, to: today });
+    },
   };
   return Object.defineProperties(vm, {
     fc: { get: () => forecast(data.stores, data.transactions, today, { method }) },
@@ -62,18 +96,6 @@ function buildVM() {
       }),
     },
     machines: { get: () => [...new Set(data.transactions.map((t) => t.machine).filter(Boolean))].slice(0, 30) },
-    machineStats: {
-      get: () => {
-        const map = new Map();
-        for (const t of data.transactions) {
-          if (!t.machine || t.type !== 'play') continue;
-          if (!map.has(t.machine)) map.set(t.machine, []);
-          map.get(t.machine).push(t);
-        }
-        return [...map].map(([machine, txs]) => ({ machine, count: txs.length, profit: summarize(data.stores, txs).profit }))
-          .sort((a, b) => b.count - a.count).slice(0, 8);
-      },
-    },
   });
 }
 
@@ -83,11 +105,19 @@ function newDraft() {
   // 前回使った店舗 → お気に入り（先頭に並んでいる）→ 最初の店舗
   const storeId = [preferStoreId, data.settings.lastStoreId].find((id) => id && ids.includes(id)) ?? ids[0] ?? null;
   preferStoreId = null;
-  return {
+  const d = {
     editId: null, storeId, medals: '', type: 'play', payout: '', investment: '',
     date: dateStr(now), time: timeStr(now), startTime: '', expectedValue: '', machine: '', machineNumber: '', memo: '',
+    machineType: '', games: '',
     detailOpen: data.settings.recordDetailOpen, playMode: false, startMedals: '', endMedals: '',
   };
+  // 実戦カウンターの「この台の結果を記録する」から来たときは、機種・G数などを引き継ぐ
+  if (pendingDraft) {
+    Object.assign(d, pendingDraft);
+    if (!ids.includes(d.storeId)) d.storeId = storeId;
+    pendingDraft = null;
+  }
+  return d;
 }
 
 function draftFromTx(t) {
@@ -100,7 +130,8 @@ function draftFromTx(t) {
     payout: s(payout), investment: s(investment), date: t.date, time: t.time,
     startTime: d.startTime ?? '', expectedValue: s(d.expectedValue),
     machine: t.machine, machineNumber: t.machineNumber, memo: t.memo,
-    detailOpen: t.type !== 'exchange' && Boolean(t.machine || t.machineNumber || t.memo || t.cash || d.startMedals != null || d.startTime || d.expectedValue != null),
+    machineType: t.machineType ?? '', games: s(d.games),
+    detailOpen: t.type !== 'exchange' && Boolean(t.machine || t.machineNumber || t.memo || t.cash || d.startMedals != null || d.startTime || d.expectedValue != null || d.games != null),
     playMode: d.startMedals != null || d.endMedals != null,
     startMedals: s(d.startMedals), endMedals: s(d.endMedals),
   };
@@ -127,8 +158,24 @@ function render() {
     case 'history':
       if (r.id === 'charts') html = ui.chartsView(vm, chartState);
       else if (r.id === 'forecast') html = ui.forecastView(vm);
+      else if (r.id === 'diagnosis') html = ui.diagnosisView(vm, diagState);
       else html = ui.historyView(vm, historyState);
       break;
+    case 'judge': {
+      if (!data.store(judgeState.storeId)) judgeState.storeId = data.settings.lastStoreId && data.store(data.settings.lastStoreId) ? data.settings.lastStoreId : data.stores[0]?.id ?? null;
+      if (judgeState.machineId && !machineList().some((m) => m.id === judgeState.machineId)) judgeState.machineId = '';
+      computeJudge();
+      html = ui.judgeView(vm, judgeState, { machines: machineList(), priors: PRIORS });
+      tab = 'home';
+      break;
+    }
+    case 'spec': {
+      const machine = r.id && r.id !== 'new' ? machineList().find((m) => m.id === r.id) : null;
+      if (r.id !== 'new' && !machine) return go('#/judge');
+      html = ui.specView(vm, machine, SPEC_FIELDS);
+      tab = 'home';
+      break;
+    }
     case 'stores':
       html = ui.storesView(vm);
       break;
@@ -167,6 +214,50 @@ function render() {
 
 function rerenderRecord() {
   main.innerHTML = ui.recordView(buildVM(), draft);
+}
+
+// ---- 実戦カウンター ----
+
+function computeJudge() {
+  const js = judgeState;
+  const games = Number(js.games) || 0;
+  if (games <= 0) {
+    js.result = null;
+    return;
+  }
+  const s = data.settings;
+  const store = data.store(js.storeId);
+  const counts = { games, splitRb: js.splitRb, countSmall: js.countSmall };
+  for (const k of COUNT_KEYS) counts[k] = Number(js[k]) || 0;
+  js.result = judge({
+    machine: machineList().find((m) => m.id === js.machineId) ?? null,
+    counts,
+    priorId: s.judgePrior,
+    todayMedals: Number(js.today) || 0,
+    lossLimit: s.dailyLossLimit,
+    stock: store ? data.balance(store.id) : null,
+    now: timeStr(new Date()),
+    closingTime: s.closingTime,
+    yenPerMedal: store ? yenPerMedal(store.exchangeRate) : 20,
+  });
+}
+
+/** 入力中はフォーカスを保つため、結果と数字の部分だけ書き換える */
+function refreshJudge() {
+  computeJudge();
+  saveJudgeState();
+  const vm = buildVM();
+  const games = Number(judgeState.games) || 0;
+  for (const k of COUNT_KEYS) {
+    const n = main.querySelector(`[data-testid="count-${k}"]`);
+    if (n) n.textContent = judgeState[k] || 0;
+    const p = main.querySelector(`[data-prob="${k}"]`);
+    if (p) p.textContent = ui.prob(games, judgeState[k]);
+  }
+  const stats = document.getElementById('jd-stats');
+  if (stats) stats.innerHTML = ui.counterStats(judgeState);
+  const res = document.getElementById('judge-result');
+  if (res) res.innerHTML = ui.judgeResult(vm, judgeState);
 }
 
 function mountCharts(vm) {
@@ -278,6 +369,54 @@ async function importFile(file) {
 
 const actions = {
   'pick-store': (el) => { draft.storeId = el.dataset.id; rerenderRecord(); },
+  'pick-mtype': (el) => {
+    // 同じものをもう一度タップすると自動判定に戻す
+    draft.machineType = draft.machineType === el.dataset.id ? '' : el.dataset.id;
+    updateTypeChips();
+  },
+  'diag-range': (el) => { diagState.range = el.dataset.id; render(); },
+  count: (el) => {
+    const k = el.dataset.key;
+    judgeState[k] = Math.max(0, (Number(judgeState[k]) || 0) + Number(el.dataset.d));
+    navigator.vibrate?.(8);
+    refreshJudge();
+  },
+  'count-reset': () => {
+    if (!confirm('G数とカウントをリセットしますか？')) return;
+    for (const k of COUNT_KEYS) judgeState[k] = 0;
+    judgeState.games = '';
+    judgeState.today = '';
+    saveJudgeState();
+    render();
+  },
+  'judge-record': () => {
+    const machine = machineList().find((m) => m.id === judgeState.machineId);
+    const rb = judgeState.splitRb ? `REG ${judgeState.rbSolo + judgeState.rbCherry}（単独${judgeState.rbSolo}・チェリー${judgeState.rbCherry}）` : `REG ${judgeState.rb}`;
+    pendingDraft = {
+      storeId: judgeState.storeId,
+      machine: machine?.name ?? '',
+      machineType: machine ? 'a' : '',
+      games: judgeState.games,
+      memo: `BIG ${judgeState.bb}・${rb}${judgeState.countSmall ? `・ブドウ ${judgeState.grape}・チェリー ${judgeState.cherry}` : ''}`,
+      detailOpen: true,
+    };
+    go('#/record');
+  },
+  'spec-reset': async () => {
+    const { id } = parseRoute();
+    if (!confirm('組み込みの値に戻しますか？')) return;
+    await data.updateSettings({ customMachines: data.settings.customMachines.filter((m) => m.id !== id) }, { silent: true });
+    toast('組み込みの値に戻しました');
+    go('#/judge');
+  },
+  'spec-delete': async () => {
+    const { id } = parseRoute();
+    if (!confirm('この機種を削除しますか？')) return;
+    await data.updateSettings({ customMachines: data.settings.customMachines.filter((m) => m.id !== id) }, { silent: true });
+    if (judgeState.machineId === id) judgeState.machineId = 'im-ex';
+    toast('機種を削除しました');
+    go('#/judge');
+  },
   'pick-type': (el) => {
     draft.type = el.dataset.id;
     if (draft.medals !== '') draft.medals = String(applySign(draft.type, draft.medals));
@@ -348,7 +487,7 @@ function updateStorePreview() {
   el.innerHTML = ui.storePreview(document.getElementById('st-medals').value, document.getElementById('st-exchange').value, data.settings.roundingMethod);
 }
 
-const DRAFT_FIELDS = new Set(['medals', 'payout', 'investment', 'date', 'time', 'startTime', 'expectedValue', 'machine', 'machineNumber', 'memo', 'startMedals', 'endMedals']);
+const DRAFT_FIELDS = new Set(['medals', 'payout', 'investment', 'date', 'time', 'startTime', 'expectedValue', 'machine', 'machineNumber', 'memo', 'startMedals', 'endMedals', 'games']);
 
 function onInput(e) {
   const t = e.target;
@@ -360,6 +499,7 @@ function onInput(e) {
     }
     if (!DRAFT_FIELDS.has(t.name)) return;
     draft[t.name] = t.value;
+    if (t.name === 'machine') updateTypeChips();
     if ((t.name === 'startMedals' || t.name === 'endMedals') && draft.startMedals !== '' && draft.endMedals !== '') {
       draft.medals = String(Number(draft.endMedals) - Number(draft.startMedals));
       document.getElementById('rec-medals').value = draft.medals;
@@ -370,6 +510,19 @@ function onInput(e) {
     if (work) work.innerHTML = ui.workPreview(vm, draft);
   } else if (t.form?.id === 'store-form') {
     updateStorePreview();
+  } else if (t.form?.id === 'judge-form' && (t.name === 'games' || t.name === 'today')) {
+    judgeState[t.name] = t.value;
+    refreshJudge();
+  }
+}
+
+/** 機種名を打つと、機種タイプの選択を自動判定に合わせて更新する */
+function updateTypeChips() {
+  const sel = draft.machineType || guessMachineType(draft.machine);
+  for (const b of main.querySelectorAll('#rec-types .chip')) {
+    const on = b.dataset.id === sel;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', String(on));
   }
 }
 
@@ -385,6 +538,16 @@ async function onChange(e) {
     } else if (t.name === 'historyStore') {
       historyState.store = t.value;
       render();
+    } else if (t.form?.id === 'judge-form') {
+      if (['dailyLossLimit', 'closingTime', 'judgePrior'].includes(t.name)) {
+        const v = t.name === 'dailyLossLimit' ? (t.value === '' ? 0 : Number(t.value)) : t.value;
+        await data.updateSettings({ [t.name]: v }, { silent: true });
+        refreshJudge();
+      } else if (['machineId', 'storeId', 'splitRb', 'countSmall'].includes(t.name)) {
+        judgeState[t.name] = t.type === 'checkbox' ? t.checked : t.value;
+        saveJudgeState();
+        render();
+      }
     } else if (t.id === 'import-file' && t.files[0]) {
       await importFile(t.files[0]);
       t.value = '';
@@ -406,10 +569,12 @@ async function saveRecord() {
     expectedValue: n('expectedValue'),
     startTime: minutes ? draft.startTime : null,
     minutes,
+    games: n('games'),
   };
   const input = {
     storeId: draft.storeId, type: draft.type, medals, cash, date: draft.date, time: draft.time,
     machine: draft.machine, machineNumber: draft.machineNumber, memo: draft.memo, detail,
+    machineType: draft.machineType || guessMachineType(draft.machine),
   };
   if (draft.editId) {
     await data.updateTransaction(draft.editId, input);
@@ -467,7 +632,21 @@ async function onSubmit(e) {
   try {
     if (form.id === 'record-form') await saveRecord();
     else if (form.id === 'store-form') await saveStore(form);
-    else if (form.id === 'goal-form') {
+    else if (form.id === 'spec-form') {
+      const { id } = parseRoute();
+      let spec;
+      try {
+        spec = normalizeSpec({ ...Object.fromEntries(new FormData(form)), id: id === 'new' ? `c-${newId().slice(0, 8)}` : id });
+      } catch (err) {
+        throw new ValidationError(err.message);
+      }
+      const others = data.settings.customMachines.filter((m) => m.id !== spec.id);
+      await data.updateSettings({ customMachines: [...others, spec] }, { silent: true });
+      judgeState.machineId = spec.id;
+      saveJudgeState();
+      toast(`「${spec.name}」のスペックを保存しました`);
+      go('#/judge');
+    } else if (form.id === 'goal-form') {
       const v = form.targetMedals.value;
       const n = v === '' ? 0 : Number(v);
       if (!Number.isInteger(n) || n < 0) throw new ValidationError('目標は 0 以上の整数で入力してください');

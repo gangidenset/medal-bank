@@ -2,6 +2,7 @@
 
 import { TX_TYPES, applySign, medalsToYen, perHour, playMinutes, roundYen, txProfit, typeLabel, yenPerMedal } from './calculation.js';
 import { can, limit, planLabel } from './plan.js';
+import { MACHINE_TYPES, guessMachineType } from './analysis.js';
 
 // ---- 表示の整形 ----
 
@@ -46,7 +47,7 @@ const topbar = (title, { back = null, right = '' } = {}) => `
 /** 記録 1件のカード（ホームと履歴で共通） */
 export function txCard(t, store, method) {
   const y = roundYen(medalsToYen(t.medals, store?.exchangeRate), method);
-  const sub = [t.machine, t.machineNumber && `${t.machineNumber}番台`].filter(Boolean).map(esc).join('・');
+  const sub = [t.machine, t.machineNumber && `${t.machineNumber}番台`, t.detail?.games && `${num(t.detail.games)}G`].filter(Boolean).map(esc).join('・');
   const mins = t.detail?.minutes;
   const ev = t.detail?.expectedValue;
   const work = [
@@ -158,6 +159,7 @@ export function homeView(vm) {
         </div>
       </div>
       <a class="btn-record" href="#/record" data-testid="record-button">${icon('record')}今日の記録</a>
+      ${can('judge') ? '<a class="btn-sub" href="#/judge" data-testid="judge-button">🎰 実戦カウンター・ヤメ判断</a>' : ''}
       ${goalCard(goal, { compact: true })}
       <section class="section">
         <div class="section-head"><h2>店舗別の貯メダル資産</h2><a href="#/stores">店舗</a></div>
@@ -284,6 +286,14 @@ export function recordView(vm, draft) {
           <div class="field"><label class="field-label" for="rec-number">台番号</label><input id="rec-number" name="machineNumber" type="text" inputmode="numeric" placeholder="例：290" value="${v('machineNumber')}"></div>
         </div>
         <datalist id="machine-list">${vm.machines.map((m) => `<option value="${esc(m)}"></option>`).join('')}</datalist>
+        <fieldset class="field">
+          <legend class="field-label">機種タイプ</legend>
+          <div class="chips small" id="rec-types">
+            ${MACHINE_TYPES.map((m) => `<button type="button" class="chip${m.id === (draft.machineType || guessMachineType(draft.machine)) ? ' on' : ''}" aria-pressed="${m.id === (draft.machineType || guessMachineType(draft.machine))}" data-action="pick-mtype" data-id="${m.id}">${m.short}</button>`).join('')}
+          </div>
+        </fieldset>
+        <div class="field"><label class="field-label" for="rec-games">ゲーム数</label>
+          <div class="unit-input"><input id="rec-games" name="games" type="number" inputmode="numeric" min="0" step="1" placeholder="例：3200" value="${v('games')}"><span>G</span></div></div>
         <div class="grid2">
           <div class="field"><label class="field-label" for="rec-investment">現金投資（円）</label><input id="rec-investment" name="investment" type="number" inputmode="numeric" min="0" step="1000" placeholder="0" value="${v('investment')}"></div>
           ${draft.type === 'exchange' ? '' : `<div class="field"><label class="field-label" for="rec-payout">換金額（円）</label><input id="rec-payout" name="payout" type="number" inputmode="numeric" min="0" step="1" placeholder="0" value="${v('payout')}"></div>`}
@@ -312,7 +322,8 @@ const historyTabs = (active) => `
   <nav class="segmented" aria-label="履歴の表示">
     <a href="#/history"${active === 'list' ? ' aria-current="page"' : ''}>一覧</a>
     <a href="#/history/charts"${active === 'charts' ? ' aria-current="page"' : ''}>グラフ</a>
-    <a href="#/history/forecast"${active === 'forecast' ? ' aria-current="page"' : ''}>予測・目標</a>
+    <a href="#/history/diagnosis"${active === 'diagnosis' ? ' aria-current="page"' : ''}>診断</a>
+    <a href="#/history/forecast"${active === 'forecast' ? ' aria-current="page"' : ''}>予測</a>
   </nav>`;
 
 const locked = (name) => `
@@ -376,8 +387,7 @@ export function chartsView(vm, st) {
 }
 
 export function forecastView(vm) {
-  const { fc, goal, method } = vm;
-  const analysis = can('analysis') ? analysisCard(vm) : '';
+  const { fc, goal } = vm;
   if (!can('forecast')) return `${topbar('履歴')}<div class="content">${historyTabs('forecast')}${goalCard(goal)}${locked('将来予測')}</div>`;
   const eta = fc && goal && !goal.achieved ? fc.goalMonths(goal.target) : null;
   return `
@@ -400,22 +410,217 @@ export function forecastView(vm) {
           : '<p class="muted">記録がたまると、今のペースで増減した場合の枚数を表示します。</p>'}
         <p class="disclaimer">※ 予測値であり、実際の遊技結果を保証するものではありません。</p>
       </div>
-      ${can('analysis') ? workCard(vm.work(vm.data.transactions), method, '稼働の成績（全期間）') : ''}
-      ${analysis}
     </div>`;
+}
 
-  function analysisCard(vm) {
-    const rows = vm.machineStats;
-    if (!rows.length) return '';
-    return `
-      <div class="card">
-        <h2 class="card-title">機種別の成績（全期間）</h2>
-        <table class="table">
-          <thead><tr><th>機種</th><th>回数</th><th>収支</th></tr></thead>
-          <tbody>${rows.map((r) => `<tr><th>${esc(r.machine)}</th><td>${r.count}回</td><td class="${tone(r.profit)}">${signed(roundYen(r.profit, method))}円</td></tr>`).join('')}</tbody>
-        </table>
-      </div>`;
+// ---- 立ち回り診断 ----
+
+export const DIAG_RANGES = [
+  { id: 'month', label: '今月' },
+  { id: '3m', label: '3ヶ月' },
+  { id: 'all', label: '全期間' },
+];
+
+const pct = (r) => `${(Math.round(r * 10) / 10).toFixed(1)}%`;
+const hourCell = (h, method) => (h == null ? '<span class="muted">−</span>' : `<span class="${tone(h)}">${signed(roundYen(h, method))}</span>`);
+
+/** 集計の表（機種タイプ別・機種別・曜日別など） */
+function groupTable(title, rows, method, { id, hourly = true, note = '' } = {}) {
+  if (!rows.length) return '';
+  return `
+    <div class="card" data-testid="${id}">
+      <h2 class="card-title">${title}</h2>
+      <div class="table-wrap"><table class="table compact">
+        <thead><tr><th></th><th>回数</th><th>勝率</th><th>収支</th>${hourly ? '<th>時給</th>' : ''}</tr></thead>
+        <tbody>${rows.map((r) => `
+          <tr><th>${esc(r.label)}</th><td>${r.count}</td><td>${pct(r.winRate)}</td>
+            <td class="${tone(r.profit)}">${signed(roundYen(r.profit, method))}</td>${hourly ? `<td>${hourCell(r.hourly, method)}</td>` : ''}</tr>`).join('')}
+        </tbody>
+      </table></div>
+      ${note ? `<p class="hint">${note}</p>` : ''}
+    </div>`;
+}
+
+export function diagnosisView(vm, st) {
+  const { method } = vm;
+  const head = `${topbar('履歴')}<div class="content">${historyTabs('diagnosis')}`;
+  if (!can('analysis')) return `${head}${locked('立ち回り診断')}</div>`;
+  const d = vm.diagnosis(st.range);
+  const o = d.overall;
+  const chips = `
+    <div class="chips small center">
+      ${DIAG_RANGES.map((r) => `<button type="button" class="chip${st.range === r.id ? ' on' : ''}" aria-pressed="${st.range === r.id}" data-action="diag-range" data-id="${r.id}">${r.label}</button>`).join('')}
+    </div>`;
+  if (!o.count) {
+    return `${head}${chips}<div class="card"><h2 class="card-title">立ち回り診断</h2>
+      <p class="muted">理由が「遊技結果」の記録から、勝率・平均収支・時給や、得意・苦手な機種や曜日を分析します。この期間の記録はまだありません。</p></div></div>`;
   }
+  return `${head}${chips}
+      <div class="card" data-testid="diag-summary">
+        <h2 class="card-title">${DIAG_RANGES.find((r) => r.id === st.range).label}の診断（${o.count}回）</h2>
+        <div class="stat-grid">
+          <div><span>勝率</span><strong data-testid="diag-winrate">${pct(o.winRate)}</strong><small>${o.wins}勝${o.losses}敗</small></div>
+          <div><span>平均収支</span><strong class="${tone(o.avgProfit)}" data-testid="diag-avg">${signed(roundYen(o.avgProfit, method))}円</strong><small>1回あたり</small></div>
+          <div><span>平均時給</span><strong data-testid="diag-hourly">${o.hourly == null ? '−' : `<span class="${tone(o.hourly)}">${signed(roundYen(o.hourly, method))}円</span>`}</strong><small>${o.minutes ? `稼働 ${duration(o.minutes)}` : '時刻を入れると表示'}</small></div>
+          <div><span>収支合計</span><strong class="${tone(o.profit)}">${signed(roundYen(o.profit, method))}円</strong><small>${o.games ? `${num(o.games)}G` : ''}</small></div>
+        </div>
+      </div>
+      <div class="card" data-testid="diag-insights">
+        <h2 class="card-title">あなたの傾向</h2>
+        ${d.insights.length
+          ? `<ul class="insights">${d.insights.map((i) => `<li class="${i.tone}"><strong>${esc(i.text)}</strong>${i.detail ? `<span>${esc(i.detail)}</span>` : ''}</li>`).join('')}</ul>`
+          : '<p class="muted">記録が増えると、得意・苦手な傾向を表示します（同じ条件で3回以上が目安）。</p>'}
+      </div>
+      ${groupTable('機種タイプ別', d.byType, method, { id: 'diag-type', note: '機種タイプは記録画面で選べます（ジャグラー等は機種名から自動で判定）。' })}
+      ${groupTable('機種別', d.byMachine.slice(0, 10), method, { id: 'diag-machine' })}
+      ${groupTable('曜日別', d.byWeekday, method, { id: 'diag-weekday', hourly: false })}
+      ${groupTable('打ち始めの時間帯別', d.byBand, method, { id: 'diag-band', note: '開始時刻を入れた記録だけで集計します。' })}
+      ${vm.data.stores.length > 1 ? groupTable('店舗別', d.byStore, method, { id: 'diag-store' }) : ''}
+      ${workCard(vm.work(d.sessions), method, '時給・期待値')}
+      <p class="disclaimer">※ 収支は貯メダルの円換算 + 現金です。過去の記録の集計で、今後の結果を保証するものではありません。</p>
+    </div>`;
+}
+
+// ---- 実戦カウンター（小役カウンター＋設定推測）・続行/ヤメ判断 ----
+
+const VERDICTS = {
+  go: { icon: '🟢', label: '続行推奨', cls: 'go' },
+  wait: { icon: '🟡', label: '様子見', cls: 'wait' },
+  stop: { icon: '🔴', label: 'ヤメ推奨', cls: 'stop' },
+};
+
+/** カウンターの項目。REG は「単独・チェリーに分ける」とき 2つに分かれる */
+export function counterItems(js) {
+  const items = [{ key: 'bb', label: 'BIG' }];
+  if (js.splitRb) items.push({ key: 'rbSolo', label: '単独REG' }, { key: 'rbCherry', label: 'チェリーREG' });
+  else items.push({ key: 'rb', label: 'REG' });
+  if (js.countSmall) items.push({ key: 'grape', label: 'ブドウ' }, { key: 'cherry', label: 'チェリー' });
+  return items;
+}
+
+/** 出現率（1/88.2、ブドウなど 1/10 未満は 1/6.02） */
+export const prob = (games, n) => (n > 0 && games > 0 ? `1/${(games / n).toFixed(games / n >= 10 ? 1 : 2)}` : '−');
+
+/** カウンターの数字と確率（タップのたびにここだけ書き換える） */
+export function counterStats(js) {
+  const g = Number(js.games) || 0;
+  const rb = js.splitRb ? (js.rbSolo || 0) + (js.rbCherry || 0) : js.rb || 0;
+  return `
+    <span>合算 <strong data-testid="jd-combined">${prob(g, (js.bb || 0) + rb)}</strong></span>
+    ${js.splitRb ? `<span>REG ${prob(g, rb)}</span>` : ''}`;
+}
+
+export function judgeView(vm, js, { machines, priors }) {
+  const { data } = vm;
+  const s = data.settings;
+  const v = (k) => esc(js[k] ?? '');
+  const store = data.store(js.storeId);
+  const machine = machines.find((m) => m.id === js.machineId);
+  const missing = machine ? ['rbSolo', 'rbCherry', 'grape', 'cherry'].filter((k) => !machine[k]) : [];
+  return `
+    ${topbar('実戦カウンター', { back: '#/home' })}
+    <form class="content" id="judge-form" novalidate autocomplete="off">
+      <div class="field"><label class="field-label" for="jd-machine">機種</label>
+        <div class="inline-form flush">
+          <select id="jd-machine" name="machineId" class="select">
+            ${machines.map((m) => `<option value="${esc(m.id)}"${js.machineId === m.id ? ' selected' : ''}>${esc(m.name)}${m.edited ? '（編集済み）' : ''}</option>`).join('')}
+            <option value=""${!machine ? ' selected' : ''}>その他の機種（設定推測なし）</option>
+          </select>
+          <a class="btn" href="#/spec/${machine ? esc(machine.id) : 'new'}">${machine ? 'スペック' : '機種を追加'}</a>
+        </div></div>
+
+      <div class="field"><label class="field-label" for="jd-games">現在G数（データカウンターの総G数）</label>
+        <div class="unit-input"><input id="jd-games" name="games" type="number" inputmode="numeric" min="0" step="1" placeholder="0" value="${v('games')}"><span>G</span></div></div>
+
+      <div class="counter-grid" data-testid="counter">
+        ${counterItems(js).map((it) => `
+          <div class="counter">
+            <button type="button" class="counter-plus" data-action="count" data-key="${it.key}" data-d="1" aria-label="${it.label}を1回足す">
+              <span class="counter-label">${it.label}</span>
+              <strong class="counter-num" data-testid="count-${it.key}">${js[it.key] || 0}</strong>
+              <span class="counter-prob" data-prob="${it.key}">${prob(Number(js.games) || 0, js[it.key] || 0)}</span>
+            </button>
+            <button type="button" class="counter-minus" data-action="count" data-key="${it.key}" data-d="-1" aria-label="${it.label}を1回減らす">−</button>
+          </div>`).join('')}
+      </div>
+      <div class="counter-stats" id="jd-stats">${counterStats(js)}</div>
+      <label class="switch"><input type="checkbox" name="splitRb" ${js.splitRb ? 'checked' : ''}><span>REG を単独・チェリー重複に分けて数える</span></label>
+      <label class="switch"><input type="checkbox" name="countSmall" ${js.countSmall ? 'checked' : ''}><span>ブドウ・チェリーも数える</span></label>
+      ${machine && missing.length && (js.countSmall || js.splitRb) ? `<p class="hint">この機種は ${missing.map((k) => ({ rbSolo: '単独REG', rbCherry: 'チェリーREG', grape: 'ブドウ', cherry: 'チェリー' })[k]).join('・')} の確率が未入力のため、推測には使っていません。「スペック」から入力できます。</p>` : ''}
+      <button type="button" class="link-btn" data-action="count-reset">カウントをリセット</button>
+
+      <div id="judge-result" aria-live="polite">${judgeResult(vm, js)}</div>
+
+      <h2 class="section-title">続行・ヤメ判断の条件</h2>
+      ${data.stores.length ? `
+        <div class="field"><label class="field-label" for="jd-store">店舗</label>
+          <select id="jd-store" name="storeId" class="select">
+            ${data.stores.map((x) => `<option value="${esc(x.id)}"${x.id === js.storeId ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}
+          </select>
+          ${store ? `<p class="hint">貯メダル <strong data-testid="jd-stock">${num(data.balance(store.id))}枚</strong>（${rateLabel(store)}）</p>` : ''}</div>` : ''}
+      <div class="field"><label class="field-label" for="jd-today">今日の収支（枚・負けはマイナス）</label>
+        <input id="jd-today" name="today" type="number" step="1" placeholder="例：-1200" value="${v('today')}"></div>
+      <div class="grid2">
+        <div class="field"><label class="field-label" for="jd-limit">1日の負けの上限（枚）</label><input id="jd-limit" name="dailyLossLimit" type="number" inputmode="numeric" min="0" step="100" placeholder="例：1500" value="${s.dailyLossLimit || ''}"></div>
+        <div class="field"><label class="field-label" for="jd-closing">閉店時刻</label><input id="jd-closing" name="closingTime" type="time" value="${esc(s.closingTime)}"></div>
+      </div>
+      <div class="field"><label class="field-label" for="jd-prior">店の状況（設定の入り方の見込み）</label>
+        <select id="jd-prior" name="judgePrior" class="select">
+          ${Object.entries(priors).map(([id, p]) => `<option value="${id}"${s.judgePrior === id ? ' selected' : ''}>${esc(p.label)}</option>`).join('')}
+        </select></div>
+      <p class="hint">負けの上限は、打つ前の冷静なときに決めておくのがおすすめです。「負けを取り返したい」ではなく数字で判断しましょう。</p>
+    </form>`;
+}
+
+export function judgeResult(vm, js) {
+  const r = js.result;
+  if (!r) return '<div class="card"><p class="muted">G数を入れて、BIG・REG をタップして数えると、設定の可能性と続行・ヤメの判定が出ます。</p></div>';
+  const vd = VERDICTS[r.verdict];
+  const quit = r.quitBy === 'now'
+    ? '<strong>今すぐヤメ</strong>'
+    : `<strong>${num(r.quitLine)}G</strong><small>（あと${num(r.quitLine - r.games)}G・約${num(r.medalsToQuit)}枚）</small>`;
+  const quitNote = { ev: 'ボーナスを引けないままここまで来たら、期待値がマイナスになります。', limit: '負けの上限に先に届きます。', closing: '閉店まで打てます。', now: '' }[r.quitBy];
+  return `
+    ${r.posterior ? `
+      <div class="card">
+        <div class="high-chance">設定4以上の可能性 <strong data-testid="high-chance">${Math.round(r.high * 100)}%</strong></div>
+        <div class="bars" data-testid="posterior">
+          ${r.posterior.map((p, i) => `<div class="bar-row${i >= 3 ? ' high' : ''}"><span>設定${i + 1}</span><div class="bar"><span style="width:${(p * 100).toFixed(1)}%"></span></div><strong>${Math.round(p * 100)}%</strong></div>`).join('')}
+        </div>
+      </div>` : ''}
+    <div class="card verdict ${vd.cls}" data-testid="verdict">
+      <div class="verdict-head"><span class="verdict-icon" aria-hidden="true">${vd.icon}</span><strong data-testid="verdict-label">${vd.label}</strong></div>
+      ${r.reasons.map((x) => `<p>${esc(x)}</p>`).join('')}
+      <dl class="kv">
+        <div><dt>推奨ヤメライン</dt><dd data-testid="quit-line">${quit}</dd></div>
+        ${quitNote ? `<p class="hint kv-note">${quitNote}</p>` : ''}
+        <div><dt>最大追加投資</dt><dd data-testid="max-add">${r.maxAdd == null ? '<span class="muted">上限未設定</span>' : `${num(r.maxAdd)}枚`}</dd></div>
+        ${r.evRest != null ? `<div><dt>現在期待値</dt><dd data-testid="ev-rest"><span class="${tone(r.evRest)}">${signedYen(roundYen(r.evRest, vm.method))}</span><small>（閉店まで約${num(r.remainingGames)}G）</small></dd></div>` : ''}
+        ${r.evPerGame != null ? `<div><dt>推定機械割</dt><dd>${r.rate.toFixed(1)}%（1G ${signed(Math.round(r.evPerGame * 10) / 10)}円）</dd></div>` : ''}
+      </dl>
+    </div>
+    <p class="disclaimer">※ スペックと数えた回数からの推定で、結果を保証するものではありません。1時間に約750G・ボーナスなしで1Gあたり約1.5枚として計算しています。</p>
+    <button class="btn" type="button" data-action="judge-record">この台の結果を記録する</button>`;
+}
+
+// ---- 機種スペックの編集 ----
+
+export function specView(vm, machine, fields) {
+  const isNew = !machine;
+  const val = (k) => (machine?.[k] ? machine[k].join(', ') : '');
+  return `
+    ${topbar(isNew ? '機種を追加' : 'スペックを編集', { back: '#/judge' })}
+    <form class="content" id="spec-form" novalidate autocomplete="off">
+      <p class="hint pad">設定1〜6の値を、カンマ区切りで6つ入力します。確率は分母（1/273.1 なら 273.1）。解析サイトなどの値を使ってください。空欄の項目は推測に使いません。</p>
+      <div class="field"><label class="field-label" for="sp-name">機種名</label>
+        <input id="sp-name" name="name" type="text" maxlength="40" value="${esc(machine?.name ?? '')}" ${machine?.builtin ? 'readonly' : ''} placeholder="例：ハッピージャグラー"></div>
+      ${fields.map((f) => `
+        <div class="field"><label class="field-label" for="sp-${f.key}">${f.label}${f.required ? '' : '（任意）'}</label>
+          <input id="sp-${f.key}" name="${f.key}" type="text" inputmode="decimal" placeholder="${f.key === 'rate' ? '97.0, 98.0, 99.5, 101.1, 103.3, 105.5' : '例：273.1, 269.7, 269.7, 259.0, 259.0, 255.0'}" value="${esc(val(f.key))}"></div>`).join('')}
+      <button class="btn-primary" type="submit" data-testid="save-spec">保存</button>
+      ${machine?.edited ? '<button class="btn-danger" type="button" data-action="spec-reset">組み込みの値に戻す</button>' : ''}
+      ${machine && !machine.builtin ? '<button class="btn-danger" type="button" data-action="spec-delete">この機種を削除</button>' : ''}
+    </form>`;
 }
 
 // ---- 店舗 ----

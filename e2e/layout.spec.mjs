@@ -7,7 +7,7 @@ const data = {
   transactions: [tx('t1', '2026-10-20', 'a', 12345, { machine: 'ファンキージャグラー2', machineNumber: '1234', memo: '長いメモ'.repeat(10) })],
   settings: { targetMedals: 200000 },
 };
-const PAGES = ['#/home', '#/record', '#/history', '#/history/charts', '#/history/forecast', '#/stores', '#/store/a', '#/settings'];
+const PAGES = ['#/home', '#/record', '#/history', '#/history/charts', '#/history/diagnosis', '#/history/forecast', '#/judge', '#/spec/im-ex', '#/stores', '#/store/a', '#/settings'];
 
 for (const width of [320, 375, 390, 414, 430]) {
   test(`${width}px：どの画面も横スクロールが出ない`, async ({ page }) => {

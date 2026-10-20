@@ -11,7 +11,7 @@ export const PLANS = {
   pro: {
     label: '有料版',
     limits: { maxStores: Infinity },
-    features: ['charts', 'forecast', 'csv', 'analysis', 'cloudBackup', 'sync'],
+    features: ['charts', 'forecast', 'csv', 'analysis', 'judge', 'cloudBackup', 'sync'],
   },
 };
 

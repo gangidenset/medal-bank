@@ -120,9 +120,9 @@ test('CSV：BOM 付き、カンマや改行を含む値はクォート', async (
   const csv = data.exportCSV();
   assert.ok(csv.startsWith('﻿日付,時刻,店舗,理由,増減枚数,円換算'));
   const rows = csv.slice(1).split('\r\n');
-  assert.equal(rows[1], '2026-10-19,,店舗A,遊技結果,-800,-14545,0,,,,,,,,,,,"a,b\n""c"""');
+  assert.equal(rows[1], '2026-10-19,,店舗A,遊技結果,-800,-14545,0,,,,,,,,,,,,,"a,b\n""c"""');
   // 3時間30分で +21,818円 → 時給換算 6,233円
-  assert.equal(rows[2], '2026-10-20,13:30,店舗A,遊技結果,1200,21818,0,アイムジャグラー,290,,,,,10:00,210,3500,6233,');
+  assert.equal(rows[2], '2026-10-20,13:30,店舗A,遊技結果,1200,21818,0,アイムジャグラー,290,,,,,10:00,210,3500,6233,Aタイプ,,');
 });
 
 test('期待値・稼働時間を保存。おかしな値は捨てる', async () => {
@@ -132,7 +132,7 @@ test('期待値・稼働時間を保存。おかしな値は捨てる', async ()
     storeId: s.id, date: '2026-10-01', time: '13:00', medals: 500,
     detail: { startTime: '10:00', minutes: 180, expectedValue: -1500 },
   });
-  assert.deepEqual(t.detail, { startMedals: null, endMedals: null, investment: null, payout: null, expectedValue: -1500, minutes: 180, startTime: '10:00' });
+  assert.deepEqual(t.detail, { startMedals: null, endMedals: null, investment: null, payout: null, expectedValue: -1500, minutes: 180, games: null, startTime: '10:00' });
   const u = await data.addTransaction({ storeId: s.id, date: '2026-10-01', medals: 1, detail: { startTime: 'xx', minutes: 9999 } });
   assert.equal(u.detail, null);
   await assert.rejects(data.addTransaction({ storeId: s.id, date: '2026-10-01', medals: 1, detail: { expectedValue: 'abc' } }), /遊技記録/);
