@@ -1,6 +1,6 @@
 // 画面の描画（HTML 文字列を返すだけ）。データの変更やイベント処理は app.js が担当する。
 
-import { TX_TYPES, applySign, medalsToYen, roundYen, typeLabel, yenPerMedal } from './calculation.js';
+import { TX_TYPES, applySign, medalsToYen, perHour, playMinutes, roundYen, txProfit, typeLabel, yenPerMedal } from './calculation.js';
 import { can, limit, planLabel } from './plan.js';
 
 // ---- 表示の整形 ----
@@ -11,6 +11,12 @@ export const signed = (n) => (n > 0 ? '+' : n < 0 ? '-' : '±') + num(Math.abs(n
 export const yen = (n) => `約${num(n)}円`;
 export const signedYen = (n) => `約${signed(n)}円`;
 export const tone = (n) => (n > 0 ? 'pos' : n < 0 ? 'neg' : 'zero');
+/** 150 → 2時間30分 */
+export const duration = (minutes) => {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h ? `${h}時間${m ? `${m}分` : ''}` : `${m}分`;
+};
 const WEEK = ['日', '月', '火', '水', '木', '金', '土'];
 const weekday = (date) => WEEK[new Date(`${date}T00:00:00`).getDay()];
 export const dayLabel = (date) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}（${weekday(date)}）`;
@@ -41,11 +47,18 @@ const topbar = (title, { back = null, right = '' } = {}) => `
 export function txCard(t, store, method) {
   const y = roundYen(medalsToYen(t.medals, store?.exchangeRate), method);
   const sub = [t.machine, t.machineNumber && `${t.machineNumber}番台`].filter(Boolean).map(esc).join('・');
+  const mins = t.detail?.minutes;
+  const ev = t.detail?.expectedValue;
+  const work = [
+    mins && `${duration(mins)}・時給 <span class="${tone(perHour(txProfit(t, store?.exchangeRate), mins))}">${signedYen(roundYen(perHour(txProfit(t, store?.exchangeRate), mins), method))}</span>`,
+    ev != null && `期待値 <span class="${tone(ev)}">${signed(ev)}円</span>`,
+  ].filter(Boolean).join('　');
   return `
     <a class="tx-card" href="#/record/${esc(t.id)}" data-testid="tx-card">
       <div class="tx-main">
         <div class="tx-store">${esc(store?.name ?? '（削除した店舗）')}${t.type !== 'play' ? ` <span class="badge">${esc(typeLabel(t.type))}</span>` : ''}</div>
         ${sub ? `<div class="tx-sub">${sub}</div>` : ''}
+        ${work ? `<div class="tx-sub" data-testid="tx-work">${work}</div>` : ''}
         ${t.memo ? `<div class="tx-memo">${esc(t.memo)}</div>` : ''}
       </div>
       <div class="tx-nums">
@@ -87,6 +100,24 @@ const goalForm = (target) => `
     <input id="goal-input" name="targetMedals" type="number" inputmode="numeric" min="0" step="1" placeholder="例：20000" value="${target || ''}">
     <button class="btn" type="submit">目標を設定</button>
   </form>`;
+
+/** 稼働の成績（時給換算・期待値）。どちらも入力した記録がなければ表示しない */
+export function workCard(w, method, title = '稼働の成績') {
+  if (!w.timedCount && !w.evCount) return '';
+  const row = (label, value, id) => `<div><dt>${label}</dt><dd${id ? ` data-testid="${id}"` : ''}>${value}</dd></div>`;
+  const y = (v) => `<span class="${tone(v)}">${signedYen(roundYen(v, method))}</span>`;
+  return `
+    <div class="card" data-testid="work-stats">
+      <h2 class="card-title">${title}</h2>
+      <dl class="kv">
+        ${w.timedCount ? row('稼働時間', `${duration(w.minutes)}（${w.timedCount}件）`) + row('時給換算', `${y(w.hourly)}/時`, 'work-hourly') : ''}
+        ${w.evCount ? row('期待値の合計', `${y(w.ev)}（${w.evCount}件）`, 'work-ev') : ''}
+        ${w.evHourly != null ? row('期待値の時給', `${y(w.evHourly)}/時`, 'work-ev-hourly') : ''}
+        ${w.evCount ? row('期待値との差', `${y(w.diff)}${w.diff > 0 ? '（上振れ）' : w.diff < 0 ? '（下振れ）' : ''}`, 'work-diff') : ''}
+      </dl>
+      <p class="hint">時給換算は開始・終了時刻を入れた記録だけで計算します。期待値との差は「実際の収支 − 期待値」（プラス＝上振れ）です。</p>
+    </div>`;
+}
 
 const emptyStores = () => `
   <div class="card empty">
@@ -174,6 +205,19 @@ export function recordPreview(vm, draft) {
     ${after < 0 ? '<div class="warn">残高がマイナスになります。枚数を確認してください。</div>' : ''}`;
 }
 
+/** 稼働時間・時給換算・期待値の時給（入力中に更新） */
+export function workPreview(vm, draft) {
+  const store = vm.data.store(draft.storeId);
+  const mins = playMinutes(draft.startTime, draft.time);
+  const ev = draft.expectedValue === '' || draft.expectedValue == null ? null : Math.trunc(Number(draft.expectedValue));
+  if (!mins) return '<span class="muted">開始・終了時刻を入れると、時給換算が表示されます。</span>';
+  const { medals, cash } = draftValues(draft);
+  const hourly = perHour(txProfit({ medals, cash }, store?.exchangeRate), mins);
+  return `
+    <div>稼働 <strong data-testid="work-duration">${duration(mins)}</strong>・時給換算 <strong class="${tone(hourly)}" data-testid="work-preview-hourly">${signedYen(roundYen(hourly, vm.method))}</strong></div>
+    ${Number.isFinite(ev) ? `<div class="muted">期待値の時給 ${signedYen(roundYen(perHour(ev, mins), vm.method))}</div>` : ''}`;
+}
+
 export function recordView(vm, draft) {
   const { data } = vm;
   if (!data.stores.length) return `${topbar('記録する')}<div class="content">${emptyStores()}</div>`;
@@ -226,11 +270,15 @@ export function recordView(vm, draft) {
         </div>` : ''}
 
       <details class="more"${draft.detailOpen ? ' open' : ''}>
-        <summary>詳しく入力（日付・機種・台番号・現金など）</summary>
+        <summary>詳しく入力（日付・時給・期待値・機種・現金など）</summary>
+        <div class="field"><label class="field-label" for="rec-date">日付</label><input id="rec-date" name="date" type="date" value="${v('date')}" required></div>
         <div class="grid2">
-          <div class="field"><label class="field-label" for="rec-date">日付</label><input id="rec-date" name="date" type="date" value="${v('date')}" required></div>
-          <div class="field"><label class="field-label" for="rec-time">時刻</label><input id="rec-time" name="time" type="time" value="${v('time')}"></div>
+          <div class="field"><label class="field-label" for="rec-start-time">開始時刻</label><input id="rec-start-time" name="startTime" type="time" value="${v('startTime')}"></div>
+          <div class="field"><label class="field-label" for="rec-time">終了時刻</label><input id="rec-time" name="time" type="time" value="${v('time')}"></div>
         </div>
+        <div class="field"><label class="field-label" for="rec-ev">期待値（円）</label>
+          <input id="rec-ev" name="expectedValue" type="number" step="1" placeholder="例：3000（設定推測やツールで出した値）" value="${v('expectedValue')}"></div>
+        <div class="work-preview" id="rec-work" aria-live="polite">${workPreview(vm, draft)}</div>
         <div class="grid2">
           <div class="field"><label class="field-label" for="rec-machine">機種名</label><input id="rec-machine" name="machine" type="text" enterkeyhint="next" placeholder="例：アイムジャグラー" value="${v('machine')}" list="machine-list"></div>
           <div class="field"><label class="field-label" for="rec-number">台番号</label><input id="rec-number" name="machineNumber" type="text" inputmode="numeric" placeholder="例：290" value="${v('machineNumber')}"></div>
@@ -294,6 +342,7 @@ export function historyView(vm, st) {
         <div class="tile"><div class="tile-label">増減</div><div class="tile-val ${tone(sum.medals)}" data-testid="history-medals">${signed(sum.medals)}<small>枚</small></div><div class="tile-sub">${signedYen(roundYen(sum.medalYen, method))}相当</div></div>
         <div class="tile"><div class="tile-label">収支</div><div class="tile-val ${tone(roundYen(sum.profit, method))}" data-testid="history-profit">${signed(roundYen(sum.profit, method))}<small>円</small></div><div class="tile-sub">現金 ${signed(sum.cash)}円・${sum.count}件</div></div>
       </div>
+      ${workCard(vm.work(list), method)}
       ${groups.length ? groups.map((g) => {
         const day = vm.summarize(g.items);
         return `
@@ -351,6 +400,7 @@ export function forecastView(vm) {
           : '<p class="muted">記録がたまると、今のペースで増減した場合の枚数を表示します。</p>'}
         <p class="disclaimer">※ 予測値であり、実際の遊技結果を保証するものではありません。</p>
       </div>
+      ${can('analysis') ? workCard(vm.work(vm.data.transactions), method, '稼働の成績（全期間）') : ''}
       ${analysis}
     </div>`;
 

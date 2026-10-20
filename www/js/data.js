@@ -4,7 +4,7 @@
 // クラウド同期に備えて、すべてのレコードに id（UUID）・createdAt・updatedAt を持たせ、
 // 削除は deletedAt を入れる「論理削除」にしている（同期時に削除を相手に伝えられるように）。
 
-import { TX_TYPES, applySign, isValidDate, medalsToYen, roundYen, storeBalance, typeLabel } from './calculation.js';
+import { TX_TYPES, applySign, isValidDate, medalsToYen, perHour, roundYen, storeBalance, txProfit, typeLabel } from './calculation.js';
 
 export const APP_ID = 'medal-bank';
 export const SCHEMA_VERSION = 1;
@@ -13,6 +13,7 @@ export const DEFAULT_SETTINGS = {
   targetMedals: 0,
   roundingMethod: 'floor', // floor（切り捨て）| round（四捨五入）| ceil（切り上げ）
   lastStoreId: null,
+  recordDetailOpen: false, // 記録画面の「詳しく入力」を開いた状態で始める
 };
 
 export class ValidationError extends Error {}
@@ -86,8 +87,13 @@ export function normalizeTransaction(input, prev = null, storeIds = null) {
       endMedals: optInt(d.endMedals),
       investment: optInt(d.investment),
       payout: optInt(d.payout),
+      expectedValue: optInt(d.expectedValue),
+      minutes: optInt(d.minutes),
     };
     if (Object.values(detail).some((v) => v !== null && !Number.isFinite(v))) throw new ValidationError('遊技記録の数を正しく入力してください');
+    if (detail.expectedValue !== null && Math.abs(detail.expectedValue) > MAX_YEN) throw new ValidationError('期待値を正しく入力してください');
+    if (detail.minutes !== null && !(detail.minutes > 0 && detail.minutes <= 1440)) detail.minutes = null;
+    detail.startTime = /^\d{2}:\d{2}$/.test(d.startTime ?? '') ? d.startTime : null;
     if (Object.values(detail).every((v) => v === null)) detail = null;
   }
   return {
@@ -115,6 +121,7 @@ function normalizeSettings(input = {}) {
   if (Number.isFinite(target) && target >= 0 && target <= MAX_MEDALS) s.targetMedals = target;
   if (['floor', 'round', 'ceil'].includes(input.roundingMethod)) s.roundingMethod = input.roundingMethod;
   if (typeof input.lastStoreId === 'string') s.lastStoreId = input.lastStoreId;
+  s.recordDetailOpen = input.recordDetailOpen === true;
   return s;
 }
 
@@ -300,14 +307,17 @@ const csvCell = (v) => {
 /** 履歴の CSV（Excel で文字化けしないよう先頭に BOM を付ける） */
 export function toCSV(stores, transactions, method = 'floor') {
   const map = new Map(stores.map((s) => [s.id, s]));
-  const head = ['日付', '時刻', '店舗', '理由', '増減枚数', '円換算', '現金収支', '機種', '台番号', '開始時貯メダル', '終了時貯メダル', '現金投資', '換金額', 'メモ'];
+  const head = ['日付', '時刻', '店舗', '理由', '増減枚数', '円換算', '現金収支', '機種', '台番号', '開始時貯メダル', '終了時貯メダル', '現金投資', '換金額',
+    '開始時刻', '稼働時間（分）', '期待値（円）', '時給換算（円）', 'メモ'];
   const rows = [...transactions].reverse().map((t) => {
     const s = map.get(t.storeId);
+    const hourly = perHour(txProfit(t, s?.exchangeRate), t.detail?.minutes);
     return [
       t.date, t.time, s?.name ?? '', typeLabel(t.type), t.medals,
       roundYen(medalsToYen(t.medals, s?.exchangeRate), method), t.cash,
       t.machine, t.machineNumber,
       t.detail?.startMedals ?? '', t.detail?.endMedals ?? '', t.detail?.investment ?? '', t.detail?.payout ?? '',
+      t.detail?.startTime ?? '', t.detail?.minutes ?? '', t.detail?.expectedValue ?? '', hourly == null ? '' : roundYen(hourly, method),
       t.memo,
     ];
   });

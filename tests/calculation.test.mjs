@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   addMonths, applySign, dailySeries, forecast, goalProgress, medalsToYen, monthStats,
-  monthlySeries, portfolio, roundYen, storeBalance, summarize,
+  monthlySeries, perHour, playMinutes, portfolio, roundYen, storeBalance, summarize, workStats,
 } from '../www/js/calculation.js';
 
 const A = { id: 'a', name: '店舗A', lendingRate: 50, exchangeRate: 55, initialMedals: 3000, createdAt: '2026-09-01T00:00:00Z' };
@@ -105,4 +105,34 @@ test('将来予測：マイナスのペースでは 0枚で止め、なくなる
   assert.equal(fc.depleteMonths, 2);
   assert.equal(fc.lowData, true);
   assert.equal(forecast([S], [], '2026-10-20'), null);
+});
+
+test('稼働時間：開始・終了時刻から分、日付をまたいでもよい', () => {
+  assert.equal(playMinutes('10:00', '13:30'), 210);
+  assert.equal(playMinutes('22:00', '01:00'), 180);
+  assert.equal(playMinutes('10:00', '10:00'), null);
+  assert.equal(playMinutes('', '13:00'), null);
+  assert.equal(perHour(10000, 150), 4000);
+  assert.equal(perHour(10000, 0), null);
+});
+
+test('稼働の成績：時給換算・期待値の合計と時給・上振れ/下振れ', () => {
+  const txs = [
+    // 3時間・+1,100枚（55枚交換 = +20,000円）・現金投資 5,000円 → 収支 +15,000円・期待値 +6,000円
+    tx('2026-10-01', 'a', 1100, { cash: -5000, detail: { minutes: 180, expectedValue: 6000 } }),
+    // 2時間・-550枚（-10,000円）・期待値 +2,000円
+    tx('2026-10-02', 'a', -550, { detail: { minutes: 120, expectedValue: 2000 } }),
+    // 期待値だけ（時間なし）：+55枚（+1,000円）・期待値 +1,000円
+    tx('2026-10-03', 'a', 55, { detail: { expectedValue: 1000 } }),
+    // 時間も期待値もない記録は含めない
+    tx('2026-10-04', 'a', 5500),
+  ];
+  const w = workStats([A], txs);
+  assert.equal(w.minutes, 300);
+  assert.equal(w.timedCount, 2);
+  assert.equal(roundYen(w.hourly), 1000); // (15,000 - 10,000) / 5時間
+  assert.equal(w.ev, 9000);
+  assert.equal(w.evCount, 3);
+  assert.equal(w.evHourly, 1600); // (6,000 + 2,000) / 5時間
+  assert.equal(roundYen(w.diff), -3000); // 実収支 6,000 - 期待値 9,000
 });

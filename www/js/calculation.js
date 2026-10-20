@@ -84,6 +84,61 @@ export function summarize(stores, transactions) {
 export const monthStats = (stores, transactions, month) =>
   summarize(stores, transactions.filter((t) => t.date.startsWith(month)));
 
+// ---- 稼働時間・時給換算・期待値 ----
+
+const TIME_RE = /^\d{2}:\d{2}$/;
+
+/** 開始・終了時刻（'HH:MM'）から稼働時間（分）。日付をまたいだ場合（22:00 → 01:00）にも対応 */
+export function playMinutes(start, end) {
+  if (!TIME_RE.test(start ?? '') || !TIME_RE.test(end ?? '')) return null;
+  const toMin = (s) => Number(s.slice(0, 2)) * 60 + Number(s.slice(3, 5));
+  let d = toMin(end) - toMin(start);
+  if (d < 0) d += 1440;
+  return d > 0 ? d : null;
+}
+
+/** 1時間あたりの金額（稼働時間がなければ null） */
+export const perHour = (yen, minutes) => (minutes > 0 ? (yen * 60) / minutes : null);
+
+/** 記録 1件の収支（貯メダルの円換算 + 現金） */
+export const txProfit = (t, exchangeRate) => medalsToYen(t.medals, exchangeRate) + (t.cash || 0);
+
+/**
+ * 稼働の成績。
+ * - 時給換算：開始・終了時刻を入れた記録の収支 ÷ 稼働時間
+ * - 期待値：入力した記録の合計と、その記録の実際の収支との差（プラス = 上振れ）
+ * - 期待値の時給：期待値と稼働時間の両方を入れた記録の期待値 ÷ 稼働時間
+ */
+export function workStats(stores, transactions) {
+  const rate = new Map(stores.map((s) => [s.id, s.exchangeRate]));
+  const r = { minutes: 0, timedProfit: 0, timedCount: 0, ev: 0, evCount: 0, evActual: 0, evTimed: 0, evMinutes: 0 };
+  for (const t of transactions) {
+    const p = txProfit(t, rate.get(t.storeId));
+    const mins = t.detail?.minutes ?? 0;
+    const ev = t.detail?.expectedValue;
+    if (mins > 0) {
+      r.minutes += mins;
+      r.timedProfit += p;
+      r.timedCount++;
+    }
+    if (ev != null) {
+      r.ev += ev;
+      r.evCount++;
+      r.evActual += p;
+      if (mins > 0) {
+        r.evTimed += ev;
+        r.evMinutes += mins;
+      }
+    }
+  }
+  return {
+    ...r,
+    hourly: perHour(r.timedProfit, r.minutes),
+    evHourly: perHour(r.evTimed, r.evMinutes),
+    diff: r.evActual - r.ev,
+  };
+}
+
 // ---- 日付（'YYYY-MM-DD' の文字列で扱い、タイムゾーンの影響を受けないようにする） ----
 
 const pad = (n) => String(n).padStart(2, '0');

@@ -68,15 +68,18 @@ stores        id, name, lendingRate（貸出枚数/千円）, exchangeRate（交
               initialMedals（登録時の枚数）, favorite, memo, createdAt, updatedAt, deletedAt
 transactions  id, date, time, storeId, type, medals（±枚）, cash（±円）,
               machine, machineNumber, memo,
-              detail { startMedals, endMedals, investment, payout } | null,
+              detail { startMedals, endMedals, investment, payout,
+                       startTime（開始時刻）, minutes（稼働時間・分）, expectedValue（期待値・円） } | null,
               createdAt, updatedAt, deletedAt
-settings      theme, targetMedals, roundingMethod, lastStoreId
+settings      theme, targetMedals, roundingMethod, lastStoreId, recordDetailOpen
 ```
 
 - **現在の貯メダル** = `initialMedals` + その店舗の記録の `medals` の合計（保存せず毎回計算するので、ずれない）。JSON 出力には `currentMedals` も書き出す。
 - **円換算** = 枚数 × 1,000 ÷ 交換枚数。端数は設定で切り捨て（初期値）・四捨五入・切り上げ。合計は店舗ごとの丸める前の値を足してから丸める。
 - **現金と貯メダルは別々**に記録する。`cash` は受け取った額（換金額）がプラス、現金投資がマイナス。
 - **収支** = 貯メダルの増減（円換算）+ 現金の出入り。換金（-1,100枚・+20,000円）は資産の形が変わるだけなので収支は 0。
+- **時給換算** = 記録の収支 ÷ 稼働時間（開始時刻〜終了時刻 `time`。日付をまたいでもよい）。開始・終了時刻を入れた記録だけで集計する。
+- **期待値**は記録ごとに円で入力。履歴（月）と「予測・目標」（全期間）に、期待値の合計・期待値の時給・期待値との差（実収支 − 期待値、プラス＝上振れ）を表示する。
 - 理由（`type`）：`play` 遊技結果 / `deposit` 貯メダル追加 / `withdraw` 引き出し / `exchange` 換金 / `transfer` 店舗移動 / `other` その他。追加は必ずプラス、引き出し・換金は必ずマイナスに自動でそろえる。
 
 ## 将来の拡張

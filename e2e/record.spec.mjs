@@ -103,3 +103,31 @@ test('枚数が空のままでは保存できない', async ({ page }) => {
   await expect(page.locator('#toast')).toContainText('増減枚数を入力してください');
   await expect(page).toHaveURL(/#\/record$/);
 });
+
+test('時給換算と期待値：入力中に時給を表示し、履歴に稼働の成績を出す', async ({ page }) => {
+  await openApp(page, { data: { stores: [A] }, hash: '#/record' });
+  await page.getByText('詳しく入力').click();
+  await page.locator('#rec-medals').fill('1200');
+  await page.getByLabel('開始時刻').fill('10:00');
+  await page.getByLabel('終了時刻').fill('13:30');
+  await page.getByLabel('期待値（円）').fill('3500');
+  await expect(page.getByTestId('work-duration')).toHaveText('3時間30分');
+  await expect(page.getByTestId('work-preview-hourly')).toHaveText('約+6,233円'); // 21,818円 ÷ 3.5時間
+  await expect(page.locator('#rec-work')).toContainText('期待値の時給 約+1,000円');
+  await page.getByTestId('save').click();
+
+  const [t] = await stored(page, 'transactions');
+  expect(t.time).toBe('13:30');
+  expect(t.detail).toMatchObject({ startTime: '10:00', minutes: 210, expectedValue: 3500 });
+
+  await nav(page, '履歴');
+  await expect(page.getByTestId('tx-work')).toHaveText('3時間30分・時給 約+6,233円　期待値 +3,500円');
+  await expect(page.getByTestId('work-hourly')).toHaveText('約+6,233円/時');
+  await expect(page.getByTestId('work-ev')).toHaveText('約+3,500円（1件）');
+  await expect(page.getByTestId('work-diff')).toHaveText('約+18,318円（上振れ）');
+
+  // 「詳しく入力」を開いた状態は次の記録でも続く
+  await nav(page, '記録');
+  await expect(page.locator('details.more')).toHaveAttribute('open', '');
+  await expect(page.getByLabel('開始時刻')).toHaveValue('');
+});

@@ -3,7 +3,7 @@
 
 import {
   addDays, addMonths, applySign, dailySeries, dateStr, firstDate, forecast, goalProgress,
-  monthOf, monthStats, monthlySeries, portfolio, roundYen, summarize, timeStr, typeLabel,
+  monthOf, monthStats, monthlySeries, playMinutes, portfolio, roundYen, summarize, timeStr, typeLabel, workStats,
 } from './calculation.js';
 import { ValidationError, createDataService } from './data.js';
 import { createDefaultStorage } from './storage.js';
@@ -12,7 +12,7 @@ import { pendingNotices } from './notify.js';
 import { limit } from './plan.js';
 import * as ui from './ui.js';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const STORAGE_LABELS = {
   indexeddb: 'この端末（IndexedDB）',
   localstorage: 'この端末（localStorage）',
@@ -51,6 +51,7 @@ function buildVM() {
     month: monthStats(data.stores, data.transactions, thisMonth),
     goal: goalProgress(pf.totalMedals, data.settings.targetMedals),
     summarize: (txs) => summarize(data.stores, txs),
+    work: (txs) => workStats(data.stores, txs),
   };
   return Object.defineProperties(vm, {
     fc: { get: () => forecast(data.stores, data.transactions, today, { method }) },
@@ -84,8 +85,8 @@ function newDraft() {
   preferStoreId = null;
   return {
     editId: null, storeId, medals: '', type: 'play', payout: '', investment: '',
-    date: dateStr(now), time: timeStr(now), machine: '', machineNumber: '', memo: '',
-    detailOpen: false, playMode: false, startMedals: '', endMedals: '',
+    date: dateStr(now), time: timeStr(now), startTime: '', expectedValue: '', machine: '', machineNumber: '', memo: '',
+    detailOpen: data.settings.recordDetailOpen, playMode: false, startMedals: '', endMedals: '',
   };
 }
 
@@ -97,8 +98,9 @@ function draftFromTx(t) {
   return {
     editId: t.id, storeId: t.storeId, medals: String(t.medals), type: t.type,
     payout: s(payout), investment: s(investment), date: t.date, time: t.time,
+    startTime: d.startTime ?? '', expectedValue: s(d.expectedValue),
     machine: t.machine, machineNumber: t.machineNumber, memo: t.memo,
-    detailOpen: t.type !== 'exchange' && Boolean(t.machine || t.machineNumber || t.memo || t.cash || d.startMedals != null),
+    detailOpen: t.type !== 'exchange' && Boolean(t.machine || t.machineNumber || t.memo || t.cash || d.startMedals != null || d.startTime || d.expectedValue != null),
     playMode: d.startMedals != null || d.endMedals != null,
     startMedals: s(d.startMedals), endMedals: s(d.endMedals),
   };
@@ -346,7 +348,7 @@ function updateStorePreview() {
   el.innerHTML = ui.storePreview(document.getElementById('st-medals').value, document.getElementById('st-exchange').value, data.settings.roundingMethod);
 }
 
-const DRAFT_FIELDS = new Set(['medals', 'payout', 'investment', 'date', 'time', 'machine', 'machineNumber', 'memo', 'startMedals', 'endMedals']);
+const DRAFT_FIELDS = new Set(['medals', 'payout', 'investment', 'date', 'time', 'startTime', 'expectedValue', 'machine', 'machineNumber', 'memo', 'startMedals', 'endMedals']);
 
 function onInput(e) {
   const t = e.target;
@@ -362,7 +364,10 @@ function onInput(e) {
       draft.medals = String(Number(draft.endMedals) - Number(draft.startMedals));
       document.getElementById('rec-medals').value = draft.medals;
     }
-    document.getElementById('rec-preview').innerHTML = ui.recordPreview(buildVM(), draft);
+    const vm = buildVM();
+    document.getElementById('rec-preview').innerHTML = ui.recordPreview(vm, draft);
+    const work = document.getElementById('rec-work');
+    if (work) work.innerHTML = ui.workPreview(vm, draft);
   } else if (t.form?.id === 'store-form') {
     updateStorePreview();
   }
@@ -391,10 +396,17 @@ async function onChange(e) {
 
 async function saveRecord() {
   const { medals, cash } = ui.draftValues(draft);
-  const detailFields = ['startMedals', 'endMedals', 'investment', 'payout'];
-  const detail = detailFields.some((k) => draft[k] !== '')
-    ? Object.fromEntries(detailFields.map((k) => [k, draft[k] === '' || (!draft.playMode && k.endsWith('Medals')) ? null : Number(draft[k])]))
-    : null;
+  const n = (k) => (draft[k] === '' || draft[k] == null ? null : Number(draft[k]));
+  const minutes = playMinutes(draft.startTime, draft.time);
+  const detail = {
+    startMedals: draft.playMode ? n('startMedals') : null,
+    endMedals: draft.playMode ? n('endMedals') : null,
+    investment: n('investment'),
+    payout: n('payout'),
+    expectedValue: n('expectedValue'),
+    startTime: minutes ? draft.startTime : null,
+    minutes,
+  };
   const input = {
     storeId: draft.storeId, type: draft.type, medals, cash, date: draft.date, time: draft.time,
     machine: draft.machine, machineNumber: draft.machineNumber, memo: draft.memo, detail,
@@ -499,7 +511,10 @@ async function init() {
   main.addEventListener('change', onChange);
   main.addEventListener('submit', onSubmit);
   main.addEventListener('toggle', (e) => {
-    if (e.target.matches?.('details.more') && draft) draft.detailOpen = e.target.open;
+    if (!e.target.matches?.('details.more') || !draft) return;
+    draft.detailOpen = e.target.open;
+    // 次回も同じ状態で開く（時給・期待値を毎回入れる人向け）
+    if (data.settings.recordDetailOpen !== draft.detailOpen) data.updateSettings({ recordDetailOpen: draft.detailOpen }, { silent: true }).catch(fail);
   }, true);
   window.addEventListener('hashchange', render);
   let resizeTimer;
