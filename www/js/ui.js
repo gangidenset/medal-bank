@@ -3,6 +3,7 @@
 import { TX_TYPES, applySign, medalsToYen, perHour, playMinutes, roundYen, txProfit, typeLabel, yenPerMedal } from './calculation.js';
 import { can, limit, planLabel } from './plan.js';
 import { MACHINE_TYPES, guessMachineType } from './analysis.js';
+import { evaluateMedals, formatExpr } from './calc.js';
 
 // ---- 表示の整形 ----
 
@@ -47,6 +48,37 @@ const topbar = (title, { back = null, right = '' } = {}) => `
     ${right}
     ${helpButton()}
   </header>`;
+
+/** 電卓（記録画面の枚数入力用・画面の下から出るシート） */
+export function calcSheet({ target, expr, current }) {
+  const label = target === 'balanceAfter' ? '保存後の貯メダル残高' : '増減枚数';
+  const result = evaluateMedals(expr);
+  const ok = result !== null && !(target === 'balanceAfter' && result < 0);
+  const key = (k, cls = '', text = k, aria = '') => `<button type="button" class="ck ${cls}" data-action="calc-key" data-k="${k}"${aria ? ` aria-label="${aria}"` : ''}>${text}</button>`;
+  return `
+    <div class="sheet-backdrop" data-action="calc-close"></div>
+    <section class="sheet calc" role="dialog" aria-modal="true" aria-labelledby="calc-title" data-testid="calc">
+      <header class="sheet-head">
+        <h2 id="calc-title">電卓：${label}</h2>
+        <button type="button" class="icon-btn" data-action="calc-close" aria-label="閉じる">✕</button>
+      </header>
+      <div class="calc-body">
+        <div class="calc-display">
+          <div class="calc-expr" data-testid="calc-expr">${esc(formatExpr(expr)) || '0'}</div>
+          <div class="calc-result" data-testid="calc-result" aria-live="polite">${result === null ? '&nbsp;' : `= ${result < 0 ? '-' : ''}${num(Math.abs(result))}枚`}</div>
+        </div>
+        ${target === 'balanceAfter' ? `<button type="button" class="calc-cur" data-action="calc-key" data-k="cur" data-v="${current}">今の残高 ${num(current)}枚 を入れる</button>` : ''}
+        <div class="calc-keys">
+          ${key('C', 'fn', 'C', 'クリア')}${key('back', 'fn', '⌫', '1文字消す')}${key('÷', 'op')}${key('×', 'op')}
+          ${key('7')}${key('8')}${key('9')}${key('−', 'op', '−', 'マイナス')}
+          ${key('4')}${key('5')}${key('6')}${key('+', 'op', '+', 'プラス')}
+          ${key('1')}${key('2')}${key('3')}${key('=', 'op')}
+          ${key('0')}${key('00')}
+          <button type="button" class="btn-primary calc-apply" data-action="calc-apply" ${ok ? '' : 'disabled'}>この値を入れる</button>
+        </div>
+      </div>
+    </section>`;
+}
 
 /** 使い方ガイド（画面の下から出るシート） */
 export function guideSheet(guide) {
@@ -293,6 +325,7 @@ export function recordView(vm, draft) {
         <div class="amount-row">
           <input id="rec-balance" class="amount-input" name="balanceAfter" type="number" inputmode="numeric" min="0" step="1" placeholder="${balanceBefore(vm, draft)}" value="${v('balanceAfter')}">
           <span class="unit">枚</span>
+          <button type="button" class="calc-btn" data-action="calc-open" data-target="balanceAfter" aria-label="電卓で計算" data-testid="calc-open-balanceAfter">🧮</button>
         </div>
         <div class="preview" id="rec-preview" aria-live="polite">${recordPreview(vm, draft)}</div>
         <p class="hint">今の残高との差が、増減枚数として記録されます。</p>
@@ -306,6 +339,7 @@ export function recordView(vm, draft) {
           <button type="button" class="sign-btn" data-action="toggle-sign" aria-label="プラスとマイナスを切り替え" ${forcedSign ? 'disabled' : ''}>±</button>
           <input id="rec-medals" class="amount-input" name="medals" type="number" step="1" placeholder="0" value="${v('medals')}">
           <span class="unit">枚</span>
+          <button type="button" class="calc-btn" data-action="calc-open" data-target="medals" aria-label="電卓で計算" data-testid="calc-open-medals">🧮</button>
         </div>
         <div class="preview" id="rec-preview" aria-live="polite">${recordPreview(vm, draft)}</div>
       </div>

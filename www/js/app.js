@@ -15,6 +15,7 @@ import { barChart, lineChart } from './chart.js';
 import { pendingNotices } from './notify.js';
 import { limit } from './plan.js';
 import * as ui from './ui.js';
+import * as calc from './calc.js';
 
 const VERSION = '1.6.0';
 const STORAGE_LABELS = {
@@ -257,6 +258,33 @@ function openGuide(key) {
 function closeGuide() {
   document.getElementById('guide-layer')?.remove();
   document.documentElement.classList.remove('sheet-open');
+}
+
+// ---- 電卓（記録画面の枚数入力） ----
+
+let calcState = null;
+
+function renderCalc() {
+  let el = document.getElementById('calc-layer');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'calc-layer';
+    document.body.append(el);
+    document.documentElement.classList.add('sheet-open');
+  }
+  el.innerHTML = ui.calcSheet(calcState);
+}
+
+/** 式の最後に数を足す（演算子の後ならつなげ、数の後なら置き換える）。 */
+function appendNumber(expr, v) {
+  const n = calc.fromValue(v);
+  return expr === '' || calc.OPS.includes(expr.at(-1)) ? expr + n : n;
+}
+
+function closeCalc() {
+  calcState = null;
+  document.getElementById('calc-layer')?.remove();
+  if (!document.getElementById('guide-layer')) document.documentElement.classList.remove('sheet-open');
 }
 
 // ---- 実戦カウンター ----
@@ -513,6 +541,34 @@ const actions = {
   },
   guide: (el) => openGuide(el.dataset.key || guideKeyFor(parseRoute())),
   'guide-close': () => closeGuide(),
+  'calc-open': (el) => {
+    if (!draft) return;
+    const target = el.dataset.target;
+    calcState = { target, expr: calc.fromValue(draft[target]), current: ui.balanceBefore(buildVM(), draft) };
+    renderCalc();
+  },
+  'calc-key': (el) => {
+    if (!calcState) return;
+    const k = el.dataset.k;
+    calcState.expr = k === 'cur' ? appendNumber(calcState.expr, el.dataset.v) : calc.press(calcState.expr, k);
+    navigator.vibrate?.(5);
+    renderCalc();
+  },
+  'calc-close': () => closeCalc(),
+  'calc-apply': () => {
+    if (!calcState || !draft) return;
+    const v = calc.evaluateMedals(calcState.expr);
+    if (v === null) return;
+    if (calcState.target === 'balanceAfter') {
+      if (v < 0) return;
+      draft.balanceAfter = String(v);
+    } else {
+      draft.medals = String(applySign(draft.type, v));
+      draft.playMode = false;
+    }
+    closeCalc();
+    rerenderRecord();
+  },
   'minus-mode': () => {
     judgeState.minusMode = !judgeState.minusMode;
     render();
@@ -879,8 +935,18 @@ async function init() {
     // 次回も同じ状態で開く（時給・期待値を毎回入れる人向け）
     if (data.settings.recordDetailOpen !== draft.detailOpen) data.updateSettings({ recordDetailOpen: draft.detailOpen }, { silent: true }).catch(fail);
   }, true);
-  window.addEventListener('hashchange', () => { closeGuide(); render(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeGuide(); });
+  window.addEventListener('hashchange', () => { closeGuide(); closeCalc(); render(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { closeGuide(); closeCalc(); return; }
+    // パソコンのキーボードでも電卓を使えるように
+    if (!calcState) return;
+    const k = { '-': '−', '*': '×', '/': '÷', Backspace: 'back', Enter: '=', Delete: 'C' }[e.key] ?? e.key;
+    if (/^[0-9]$/.test(k) || calc.OPS.includes(k) || ['back', '=', 'C'].includes(k)) {
+      e.preventDefault();
+      calcState.expr = calc.press(calcState.expr, k);
+      renderCalc();
+    }
+  });
   // 戻るジェスチャーなどで全画面（横向き固定）が終わったら、ボタンの表示を戻す
   document.addEventListener('fullscreenchange', () => {
     if (!document.fullscreenElement) screen.orientation?.unlock?.();

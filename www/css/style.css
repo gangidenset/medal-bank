@@ -696,3 +696,27 @@ body[data-route="counter"] .toast { bottom: calc(76px + var(--safe-b)); }
 }
 #update-bar span { flex: 1; }
 #update-bar button { min-height: 40px; padding: 0 16px; border: 0; border-radius: 10px; background: #8f88ff; color: #0e1015; font-weight: 800; cursor: pointer; }
+
+/* ---- 電卓（記録画面の枚数入力） ---- */
+.calc-btn {
+  width: 52px; height: 64px; flex: none;
+  border-radius: 12px; border: 1.5px solid var(--line); background: var(--surface-2);
+  font-size: 24px; cursor: pointer;
+}
+.calc-btn:active { transform: scale(.95); }
+.calc-body { padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
+.calc-display { background: var(--surface-2); border-radius: 12px; padding: 10px 14px; text-align: right; font-variant-numeric: tabular-nums; }
+.calc-expr { font-size: 28px; font-weight: 800; min-height: 38px; overflow-wrap: anywhere; line-height: 1.3; }
+.calc-result { font-size: 18px; font-weight: 700; color: var(--accent); min-height: 26px; }
+.calc-cur { min-height: 44px; border-radius: 10px; border: 1.5px dashed var(--accent); background: transparent; color: var(--accent); font-weight: 700; font-size: 15px; cursor: pointer; }
+.calc-keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.ck {
+  min-height: 56px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--surface);
+  font-size: 24px; font-weight: 800; color: var(--text); cursor: pointer; font-variant-numeric: tabular-nums;
+}
+.ck.op { background: var(--surface-2); color: var(--accent); }
+.ck.fn { background: var(--surface-2); font-size: 20px; }
+.ck:active { transform: scale(.95); }
+.calc-apply { grid-column: span 2; min-height: 56px; font-size: 16px; white-space: nowrap; padding: 0 8px; }
+.calc-apply:disabled { opacity: .4; }
+@media (max-height: 640px) { .ck, .calc-apply { min-height: 46px; } .calc-expr { font-size: 22px; min-height: 30px; } }
