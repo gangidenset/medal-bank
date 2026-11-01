@@ -77,22 +77,20 @@ test('換金：枚数はマイナス・受け取った金額は現金として�
   expect([t.type, t.medals, t.cash]).toEqual(['exchange', -1100, 20000]);
 });
 
-test('詳しく入力：日付・機種・台番号・現金投資、開始/終了の貯メダルから差枚を計算', async ({ page }) => {
+test('詳しく入力：日付・機種・台番号・現金投資（差枚は「残高で入力」で計算するので、開始/終了の貯メダル欄はない）', async ({ page }) => {
   await openApp(page, { data: { stores: [A] }, hash: '#/record' });
   await page.getByText('詳しく入力').click();
   await page.getByLabel('日付').fill('2026-10-18');
   await page.getByLabel('機種名').fill('アイムジャグラー');
   await page.getByLabel('台番号').fill('290');
   await page.getByLabel('現金投資（円）').fill('5000');
-  await page.getByText('開始時・終了時の貯メダルから差枚を計算する').click();
-  await page.getByLabel('開始時貯メダル').fill('3000');
-  await page.getByLabel('終了時貯メダル').fill('4200');
-  await expect(page.locator('#rec-medals')).toHaveValue('1200');
+  await expect(page.getByLabel('開始時貯メダル')).toHaveCount(0);
+  await page.locator('#rec-medals').fill('1200');
   await page.getByTestId('save').click();
   const [t] = await stored(page, 'transactions');
   expect(t).toMatchObject({
     date: '2026-10-18', machine: 'アイムジャグラー', machineNumber: '290', medals: 1200, cash: -5000,
-    detail: { startMedals: 3000, endMedals: 4200, investment: 5000, payout: null },
+    detail: { startMedals: null, endMedals: null, investment: 5000, payout: null },
   });
   await expect(page.getByTestId('month-profit')).toHaveText('+16,818円');
 });

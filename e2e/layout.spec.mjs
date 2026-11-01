@@ -59,7 +59,7 @@ test('PWA：manifest（standalone・アイコン）とサービスワーカー',
   await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute('href', 'icons/apple-touch-icon.png');
 });
 
-test('横向き：どの画面も横スクロールが出ず、実戦カウンターのボタンが1列に並ぶ', async ({ page }) => {
+test('横向き：どの画面も横スクロールが出ず、小役カウンターのボタンが1列に並ぶ', async ({ page }) => {
   await page.setViewportSize({ width: 812, height: 375 });
   await openApp(page, { data });
   for (const hash of PAGES) {
@@ -68,7 +68,7 @@ test('横向き：どの画面も横スクロールが出ず、実戦カウン�
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow, hash).toBeLessThanOrEqual(0);
   }
-  await page.evaluate(() => { location.hash = '#/judge'; });
+  await page.evaluate(() => { location.hash = '#/counter'; });
   const buttons = page.locator('.kachi-btn');
   await expect(buttons).toHaveCount(4); // BIG・REG・ブドウ・チェリー
   const tops = await buttons.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
@@ -76,6 +76,7 @@ test('横向き：どの画面も横スクロールが出ず、実戦カウン�
   const box = await buttons.first().boundingBox();
   expect(box.height).toBeGreaterThanOrEqual(100);
   // 下部ナビは横向きでは薄くなる
+  await page.evaluate(() => { location.hash = '#/judge'; });
   const nav = await page.locator('.nav a').first().boundingBox();
   expect(nav.height).toBeLessThanOrEqual(50);
   expect(nav.height).toBeGreaterThanOrEqual(44);
@@ -91,7 +92,7 @@ test('manifest は画面の向きを固定しない', async ({ request }) => {
 });
 
 test('「横向き」ボタン：横に固定できない環境では案内を出す', async ({ page }) => {
-  await openApp(page, { data, hash: '#/judge' });
+  await openApp(page, { data, hash: '#/counter' });
   await page.evaluate(() => { Object.defineProperty(screen, 'orientation', { value: undefined, configurable: true }); });
   await page.getByTestId('landscape').click();
   await expect(page.locator('#toast')).toContainText('スマホを横にしてください');

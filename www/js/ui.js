@@ -390,16 +390,6 @@ export function recordView(vm, draft) {
           <div class="field"><label class="field-label" for="rec-investment">現金投資（円）</label><input id="rec-investment" name="investment" type="number" inputmode="numeric" min="0" step="1000" placeholder="0" value="${v('investment')}"></div>
           ${draft.type === 'exchange' ? '' : `<div class="field"><label class="field-label" for="rec-payout">換金額（円）</label><input id="rec-payout" name="payout" type="number" inputmode="numeric" min="0" step="1" placeholder="0" value="${v('payout')}"></div>`}
         </div>
-        <label class="switch">
-          <input type="checkbox" name="playMode" ${draft.playMode ? 'checked' : ''}>
-          <span>開始時・終了時の貯メダルから差枚を計算する</span>
-        </label>
-        ${draft.playMode ? `
-          <div class="grid2">
-            <div class="field"><label class="field-label" for="rec-start">開始時貯メダル</label><input id="rec-start" name="startMedals" type="number" inputmode="numeric" min="0" step="1" value="${v('startMedals')}"></div>
-            <div class="field"><label class="field-label" for="rec-end">終了時貯メダル</label><input id="rec-end" name="endMedals" type="number" inputmode="numeric" min="0" step="1" value="${v('endMedals')}"></div>
-          </div>
-          <p class="hint">差枚（終了 − 開始）が増減枚数に入ります。</p>` : ''}
         <div class="field"><label class="field-label" for="rec-memo">メモ</label><textarea id="rec-memo" name="memo" rows="2" placeholder="設定推測・ボーナス回数など">${v('memo')}</textarea></div>
       </details>
 
@@ -612,7 +602,7 @@ export function counterStats(js, { games = true } = {}) {
     <div class="hi"><span>設定4以上</span><strong data-testid="jd-high-mini">${high == null ? '−' : `${Math.round(high * 100)}%`}</strong></div>`;
 }
 
-/** 色つきの大きなボタン（実戦カウンター・全画面の小役カウンターで共通） */
+/** 色つきの大きなボタン（全画面の小役カウンター） */
 function counterButtons(js, extraClass = '') {
   const items = counterItems(js);
   return `
@@ -623,6 +613,22 @@ function counterButtons(js, extraClass = '') {
               <strong class="k-num" data-testid="count-${it.key}">${js[it.key] || 0}</strong>
               <span class="k-prob" data-prob="${it.key}">${prob(Number(js.games) || 0, js[it.key] || 0)}</span>
             </button>`).join('')}
+        </div>`;
+}
+
+/** 判断画面の回数の一覧（見るだけ。数えるのは全画面の小役カウンターで） */
+function counterSummary(js) {
+  const games = Number(js.games) || 0;
+  const items = counterItems(js);
+  const cols = items.length === 4 ? 4 : Math.min(items.length, 3);
+  return `
+        <div class="k-sum" style="--cols:${cols}">
+          ${items.map((it) => `
+            <div class="k-sum-item k-${it.color}">
+              <span class="k-label">${it.label}</span>
+              <strong class="k-num" data-testid="count-${it.key}">${js[it.key] || 0}</strong>
+              <span class="k-prob" data-prob="${it.key}">${prob(games, js[it.key] || 0)}</span>
+            </div>`).join('')}
         </div>`;
 }
 
@@ -689,12 +695,10 @@ export function judgeView(vm, js, { machines, priors }) {
       <div class="field"><label class="field-label" for="jd-games">現在G数（データカウンターの総G数）</label>
         <div class="unit-input"><input id="jd-games" name="games" type="number" inputmode="numeric" min="0" step="1" placeholder="0" value="${v('games')}"><span>G</span></div></div>
 
-      <a class="btn-sub" href="#/counter" data-testid="open-counter">⛶ 全画面の小役カウンターで数える</a>
-      <div class="kachi${js.minusMode ? ' minus' : ''}" data-testid="counter">
+      <div class="kachi kachi-summary" data-testid="counter">
         <div class="kachi-status" id="jd-stats" aria-live="polite">${counterStats(js)}</div>
-        ${counterButtons(js)}
-        ${counterTools(js)}
-        ${js.minusMode ? '<p class="k-minus-note">−モード中：タップすると1回減ります</p>' : ''}
+        ${counterSummary(js)}
+        <a class="btn-primary k-open" href="#/counter" data-testid="open-counter">⛶ 小役カウンターで数える</a>
       </div>
       <details class="more counter-opts"${js.optsOpen ? ' open' : ''}>
         <summary>数える項目（BIG・REGの内訳・ブドウ・チェリー）</summary>

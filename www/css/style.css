@@ -720,3 +720,15 @@ body[data-route="counter"] .toast { bottom: calc(76px + var(--safe-b)); }
 .calc-apply { grid-column: span 2; min-height: 56px; font-size: 16px; white-space: nowrap; padding: 0 8px; }
 .calc-apply:disabled { opacity: .4; }
 @media (max-height: 640px) { .ck, .calc-apply { min-height: 46px; } .calc-expr { font-size: 22px; min-height: 30px; } }
+
+/* ---- 続行・ヤメ判断：回数の一覧（数えるのは全画面の小役カウンター） ---- */
+.k-sum { display: grid; grid-template-columns: repeat(var(--cols, 2), 1fr); gap: 8px; }
+.k-sum-item {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0;
+  padding: 8px 4px; border-radius: 14px; color: #fff;
+  background: linear-gradient(180deg, var(--c1), var(--c2));
+}
+.k-sum-item .k-label { font-size: 12px; white-space: nowrap; }
+.k-sum-item .k-num { font-size: 30px; }
+.k-sum-item .k-prob { font-size: 12px; padding: 0 6px; }
+.k-open { min-height: 60px; font-size: 18px; display: flex; align-items: center; justify-content: center; text-decoration: none; }

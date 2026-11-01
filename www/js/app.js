@@ -116,7 +116,7 @@ function newDraft() {
     date: dateStr(now), time: timeStr(now), startTime: '', expectedValue: '', machine: '', machineNumber: '', memo: '',
     machineType: '', games: '', high: '',
     inputMode: data.settings.recordInputMode, balanceAfter: '',
-    detailOpen: data.settings.recordDetailOpen, playMode: false, startMedals: '', endMedals: '',
+    detailOpen: data.settings.recordDetailOpen, startMedals: '', endMedals: '',
   };
   // 実戦カウンターの「この台の結果を記録する」から来たときは、機種・G数などを引き継ぐ
   if (pendingDraft) {
@@ -140,7 +140,7 @@ function draftFromTx(t) {
     machineType: t.machineType ?? '', games: s(d.games), high: s(d.high),
     inputMode: 'diff', balanceAfter: '',
     detailOpen: t.type !== 'exchange' && Boolean(t.machine || t.machineNumber || t.memo || t.cash || d.startMedals != null || d.startTime || d.expectedValue != null || d.games != null),
-    playMode: d.startMedals != null || d.endMedals != null,
+    // 以前の版の「開始時・終了時の貯メダル」は入力欄をなくしたが、編集しても値は残す
     startMedals: s(d.startMedals), endMedals: s(d.endMedals),
   };
 }
@@ -564,7 +564,6 @@ const actions = {
       draft.balanceAfter = String(v);
     } else {
       draft.medals = String(applySign(draft.type, v));
-      draft.playMode = false;
     }
     closeCalc();
     rerenderRecord();
@@ -630,7 +629,6 @@ const actions = {
   quick: (el) => {
     const n = (Number(draft.medals) || 0) + Number(el.dataset.v);
     draft.medals = String(applySign(draft.type, n));
-    draft.playMode = false;
     rerenderRecord();
   },
   'quick-clear': () => { draft.medals = ''; rerenderRecord(); },
@@ -686,23 +684,14 @@ function updateStorePreview() {
   el.innerHTML = ui.storePreview(document.getElementById('st-medals').value, document.getElementById('st-exchange').value, data.settings.roundingMethod);
 }
 
-const DRAFT_FIELDS = new Set(['medals', 'payout', 'investment', 'date', 'time', 'startTime', 'expectedValue', 'machine', 'machineNumber', 'memo', 'startMedals', 'endMedals', 'games', 'balanceAfter']);
+const DRAFT_FIELDS = new Set(['medals', 'payout', 'investment', 'date', 'time', 'startTime', 'expectedValue', 'machine', 'machineNumber', 'memo', 'games', 'balanceAfter']);
 
 function onInput(e) {
   const t = e.target;
   if (t.form?.id === 'record-form' && draft) {
-    if (t.name === 'playMode') {
-      draft.playMode = t.checked;
-      rerenderRecord();
-      return;
-    }
     if (!DRAFT_FIELDS.has(t.name)) return;
     draft[t.name] = t.value;
     if (t.name === 'machine') updateTypeChips();
-    if ((t.name === 'startMedals' || t.name === 'endMedals') && draft.startMedals !== '' && draft.endMedals !== '') {
-      draft.medals = String(Number(draft.endMedals) - Number(draft.startMedals));
-      document.getElementById('rec-medals').value = draft.medals;
-    }
     const vm = buildVM();
     document.getElementById('rec-preview').innerHTML = ui.recordPreview(vm, draft);
     const work = document.getElementById('rec-work');
@@ -795,8 +784,8 @@ async function saveRecord() {
   const n = (k) => (draft[k] === '' || draft[k] == null ? null : Number(draft[k]));
   const minutes = playMinutes(draft.startTime, draft.time);
   const detail = {
-    startMedals: draft.playMode ? n('startMedals') : null,
-    endMedals: draft.playMode ? n('endMedals') : null,
+    startMedals: n('startMedals'),
+    endMedals: n('endMedals'),
     investment: n('investment'),
     payout: n('payout'),
     expectedValue: n('expectedValue'),
