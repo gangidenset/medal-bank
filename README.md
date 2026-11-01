@@ -70,7 +70,7 @@ www/                    アプリ本体（GitHub Pages・Capacitor の公開フ�
   js/machines.js        機種スペック（組み込みは BIG・REG・機械割のみ）
   manifest.json         PWA の設定（standalone 表示・アイコン）
   service-worker.js     オフライン対応
-  icons/                アプリアイコン（scripts/make_icons.py で生成）
+  icons/                アプリアイコン（assets/icon-source.png から scripts/make_icons.py で生成）
 tests/                  単体テスト（node --test）
 e2e/                    画面操作テスト（Playwright）
 capacitor.config.json   ネイティブアプリ化の設定（webDir: www）
@@ -118,7 +118,7 @@ Actions の画面の「Run workflow」から手動でビルドもできる。
 **しくみ**
 
 - `npx cap add android` → `npx capacitor-assets generate --android`（`assets/` のアイコン・起動画面から各解像度を生成）→ `assembleRelease` → `apksigner` で署名。
-- `android/` フォルダは毎回 CI で作るのでリポジトリには入れない。`assets/` の元画像は `python scripts/make_android_assets.py`（Pillow）で `www/icons` から作り直せる。
+- `android/` フォルダは毎回 CI で作るのでリポジトリには入れない。`assets/` のアイコン・起動画面は `npm run icons` で `assets/icon-source.png` から作る。
 - 署名鍵：Secrets（Settings → Secrets and variables → Actions）の `ANDROID_KEYSTORE_BASE64`（PKCS12 の鍵ファイルを base64 にしたもの・別名 `medalbank`）と `ANDROID_KEYSTORE_PASSWORD` で署名する。未設定ならビルドごとに使い捨ての鍵で署名するので、インストールはできるが次の版を上書きインストールできない（一度アンインストールが必要で、データも消えるので先に JSON バックアップを取る）。鍵は次のように作る：
   ```bash
   keytool -genkeypair -storetype PKCS12 -keystore medalbank.p12 -alias medalbank -keyalg RSA -keysize 2048 -validity 36500 -dname "CN=Medal Bank"
@@ -159,4 +159,4 @@ iOS は `npm install @capacitor/ios && npx cap add ios` で Xcode プロジェ�
 
 GitHub にリポジトリを作って `main` に push すると、`.github/workflows/pages.yml` がテストを実行し、通ったら `www/` を公開する（リポジトリの Settings → Pages → Source を「GitHub Actions」にする）。
 
-アイコンを変えるときは `scripts/make_icons.py` を編集して `npm run icons`。アプリのファイルを追加・削除したら `www/service-worker.js` の `SHELL` を更新し、`CACHE` の番号を上げる。
+アイコンを変えるときは `assets/icon-source.png`（1024×1024・背景は端まで塗る）を差し替えて `npm run icons`（Pillow が必要）。PWA と Android アプリの両方のアイコン・起動画面が作り直される。アプリのファイルを追加・削除したら `www/service-worker.js` の `SHELL` を更新し、`CACHE` の番号を上げる。
