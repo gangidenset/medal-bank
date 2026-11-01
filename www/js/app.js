@@ -404,6 +404,18 @@ function applyTheme() {
 // ---- 保存・読み込み ----
 
 async function download(filename, content, type) {
+  // Android アプリ（APK）の中ではダウンロードが使えないので、いったん保存してから共有シート（Google ドライブ・ファイルなど）に渡す
+  // （@capacitor/core を読み込まずに使えるよう、ネイティブ側のプラグインを直接呼ぶ）
+  const cap = window.Capacitor;
+  if (cap?.isNativePlatform?.() && cap.nativePromise) {
+    try {
+      const { uri } = await cap.nativePromise('Filesystem', 'writeFile', { path: filename, data: content, directory: 'CACHE', encoding: 'utf8', recursive: true });
+      await cap.nativePromise('Share', 'share', { title: filename, files: [uri], dialogTitle: '保存先を選ぶ' });
+    } catch (e) {
+      if (!/cancel/i.test(String(e?.message))) toast('保存できませんでした。もう一度お試しください。', { error: true });
+    }
+    return;
+  }
   const blob = new Blob([content], { type });
   const file = typeof File === 'function' ? new File([blob], filename, { type }) : null;
   // iPhone のホーム画面アプリではダウンロードが使えないことがあるので、共有シート（「ファイルに保存」）を使う

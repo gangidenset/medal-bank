@@ -1,0 +1,97 @@
+# push すると Android アプリ（APK）を作り、GitHub の Releases に「最新版 APK」として置く。
+# スマホでは https://github.com/gangidenset/medal-bank/releases/latest から medal-bank.apk をダウンロードして入れる。
+name: Build Android APK
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'www/**'
+      - 'assets/**'
+      - 'capacitor.config.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - run: npm test
+
+      - name: Android プロジェクトを作る
+        run: |
+          npx cap add android
+          npx capacitor-assets generate --android
+          npx cap sync android
+          # 更新して入れられるよう、ビルドごとに versionCode を上げる
+          VERSION=$(node -p "require('./package.json').version")
+          sed -i "s/versionCode 1$/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"$VERSION\"/" android/app/build.gradle
+          grep -E "versionCode|versionName" android/app/build.gradle
+
+      - name: APK をビルド
+        working-directory: android
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: 署名
+        env:
+          # 上書きインストールできるよう、Secrets の鍵で毎回同じ署名にする（README「署名鍵」参照）
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.p12"
+            echo "SIGNING=secrets" >> "$GITHUB_ENV"
+          else
+            # Secrets が未設定なら、このビルドだけの鍵で署名する（インストールはできるが、次の版への上書きはできない）
+            echo "::warning::ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD が未設定のため、使い捨ての鍵で署名します"
+            KEYSTORE_PASSWORD=$(openssl rand -hex 16)
+            keytool -genkeypair -storetype PKCS12 -keystore "$RUNNER_TEMP/release.p12" -alias medalbank \
+              -keyalg RSA -keysize 2048 -validity 36500 -storepass "$KEYSTORE_PASSWORD" -keypass "$KEYSTORE_PASSWORD" \
+              -dname "CN=Medal Bank"
+            echo "SIGNING=temporary" >> "$GITHUB_ENV"
+          fi
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/zipalign" -f -p 4 android/app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" sign --ks "$RUNNER_TEMP/release.p12" --ks-pass "pass:$KEYSTORE_PASSWORD" \
+            --out medal-bank.apk "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" verify --print-certs medal-bank.apk
+          rm -f "$RUNNER_TEMP/release.p12"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: medal-bank-apk
+          path: medal-bank.apk
+          retention-days: 30
+
+      - name: Releases に置く
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          gh release delete apk-latest --yes --cleanup-tag || true
+          gh release create apk-latest medal-bank.apk \
+            --target "$GITHUB_SHA" \
+            --title "メダルバンク Android 版 v$VERSION（ビルド ${{ github.run_number }}）" \
+            --notes "スマホでこのページを開き、下の medal-bank.apk をタップしてダウンロード → 開いてインストールしてください。
+          初回は「提供元不明のアプリ」のインストールを許可する必要があります（Chrome などのダウンロードしたアプリに許可）。
+          ブランチ: ${GITHUB_REF_NAME} / コミット: ${GITHUB_SHA::7}
+          $( [ "$SIGNING" = temporary ] && echo '※ このビルドは使い捨ての鍵で署名しています。前の版が入っている場合は、JSON バックアップを取ってからアンインストールして入れ直してください。' )" \
+            --latest

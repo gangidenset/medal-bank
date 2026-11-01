@@ -1,6 +1,8 @@
 # メダルバンク
 
-「スロットの貯メダルを、自分の資産として管理する」スマートフォン向けアプリ（PWA）。
+「スロットの貯メダルを、自分の資産として管理する」スマートフォン向けアプリ（PWA ／ Android アプリ）。
+
+**Android アプリ（APK）**：https://github.com/gangidenset/medal-bank/releases/latest から `medal-bank.apk` をダウンロードしてインストール（[入れ方](#android-アプリapk)）。
 
 - 開く → 「今日の記録」 → 店舗（前回の店舗が選択済み）→ `+1,000` などをタップ → 保存、の数秒で記録できる
 - 総貯メダル・換金価値（店舗ごとの交換枚数で円換算）・今月の増減と収支をホームに大きく表示
@@ -72,6 +74,7 @@ www/                    アプリ本体（GitHub Pages・Capacitor の公開フ�
 tests/                  単体テスト（node --test）
 e2e/                    画面操作テスト（Playwright）
 capacitor.config.json   ネイティブアプリ化の設定（webDir: www）
+assets/                 Android アプリのアイコン・起動画面の元画像
 ```
 
 指示書の例ではファイルをリポジトリ直下に置いていたが、Capacitor でネイティブアプリにするときに `node_modules` などを含めずに `www/` だけを取り込めるよう、アプリ本体は `www/` にまとめた。
@@ -99,18 +102,34 @@ settings      theme, targetMedals, roundingMethod, lastStoreId, recordDetailOpen
 
 ## 将来の拡張
 
-### ネイティブアプリ（Android / iOS）
+### Android アプリ（APK）
 
-画面遷移は `#` によるハッシュ方式、パスはすべて相対、外部 CDN なしなので、`www/` をそのまま Capacitor に載せられる。
+push すると GitHub Actions（`.github/workflows/android.yml`）が Capacitor で APK を作り、Releases の「最新版」に `medal-bank.apk` を置く。
 
-```bash
-npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/ios
-npx cap add android
-npx cap add ios
-npx cap sync
-```
+**スマホへの入れ方**
 
-`capacitor.config.json` の `appId` は公開前に自分のドメインに合わせて変える。ネイティブ版ではサービスワーカーを登録しない（`app.js`）。保存先を SQLite などにしたい場合は `storage.js` に同じインターフェースのアダプタを追加する。
+1. スマホのブラウザで https://github.com/gangidenset/medal-bank/releases/latest を開く
+2. 「Assets」の `medal-bank.apk` をタップしてダウンロード
+3. ダウンロードしたファイルを開く →「この提供元のアプリを許可」をオンにして「インストール」
+4. 新しい版は同じ手順で上書きインストールすれば、データはそのまま残る
+
+Actions の画面の「Run workflow」から手動でビルドもできる。
+
+**しくみ**
+
+- `npx cap add android` → `npx capacitor-assets generate --android`（`assets/` のアイコン・起動画面から各解像度を生成）→ `assembleRelease` → `apksigner` で署名。
+- `android/` フォルダは毎回 CI で作るのでリポジトリには入れない。`assets/` の元画像は `python scripts/make_android_assets.py`（Pillow）で `www/icons` から作り直せる。
+- 署名鍵：Secrets（Settings → Secrets and variables → Actions）の `ANDROID_KEYSTORE_BASE64`（PKCS12 の鍵ファイルを base64 にしたもの・別名 `medalbank`）と `ANDROID_KEYSTORE_PASSWORD` で署名する。未設定ならビルドごとに使い捨ての鍵で署名するので、インストールはできるが次の版を上書きインストールできない（一度アンインストールが必要で、データも消えるので先に JSON バックアップを取る）。鍵は次のように作る：
+  ```bash
+  keytool -genkeypair -storetype PKCS12 -keystore medalbank.p12 -alias medalbank -keyalg RSA -keysize 2048 -validity 36500 -dname "CN=Medal Bank"
+  base64 -w0 medalbank.p12   # これを ANDROID_KEYSTORE_BASE64 に、決めたパスワードを ANDROID_KEYSTORE_PASSWORD に登録
+  ```
+  鍵ファイルはリポジトリに入れない（`.gitignore` 済み）。なくすと上書きインストールできなくなるので、手元に保管する。
+- `versionCode` は Actions の実行番号、`versionName` は `package.json` の `version`。
+- アプリの中ではダウンロードが使えないので、JSON / CSV の保存は `@capacitor/filesystem` で一時保存して `@capacitor/share` の共有シート（Google ドライブ・ファイル など）に渡す（`app.js` の `download`）。
+- ネイティブ版ではサービスワーカーを登録しない（`app.js`）。データは WebView の IndexedDB に保存される（ブラウザ版とは別の保存場所なので、移すときは JSON バックアップ → 復元）。
+
+iOS は `npm install @capacitor/ios && npx cap add ios` で Xcode プロジェクトを作れる（ビルドには Mac が必要）。保存先を SQLite などにしたい場合は `storage.js` に同じインターフェースのアダプタを追加する。
 
 ### クラウド同期（Firebase / Supabase）
 
