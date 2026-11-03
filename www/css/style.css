@@ -732,3 +732,19 @@ body[data-route="counter"] .toast { bottom: calc(76px + var(--safe-b)); }
 .k-sum-item .k-num { font-size: 30px; }
 .k-sum-item .k-prob { font-size: 12px; padding: 0 6px; }
 .k-open { min-height: 60px; font-size: 18px; display: flex; align-items: center; justify-content: center; text-decoration: none; }
+
+/* ---- 月ごとのふり返り ---- */
+.review-card { display: flex; align-items: center; gap: 4px; border-radius: 14px; padding: 4px 4px 4px 14px; background: color-mix(in srgb, var(--accent) 14%, var(--surface)); border: 1.5px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+.review-card a { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 44px; color: var(--text); text-decoration: none; font-size: 15px; }
+.review-card a strong { color: var(--accent); }
+.review-go { margin-left: auto; color: var(--accent); font-weight: 800; white-space: nowrap; }
+.month-nav .icon-btn[data-off] { opacity: .3; pointer-events: none; }
+.rv-hero .hero-yen { font-size: 13px; }
+.rv-list { display: flex; flex-direction: column; padding: 4px 14px; }
+.rv-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.rv-row:last-child { border-bottom: 0; }
+.rv-row > span { font-size: 14px; color: var(--muted); font-weight: 700; flex: none; }
+.rv-row > div { display: flex; flex-direction: column; align-items: flex-end; text-align: right; min-width: 0; }
+.rv-row strong { overflow-wrap: anywhere; }
+.rv-row small { font-size: 13px; font-weight: 700; }
+.review-link { text-align: center; }

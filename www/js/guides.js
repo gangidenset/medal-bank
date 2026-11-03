@@ -242,6 +242,28 @@ export const GUIDES = {
     ],
   },
 
+  review: {
+    title: 'ふり返りの使い方',
+    sections: [
+      {
+        h: '見られること',
+        items: [
+          'その月の収支（貯メダルの円換算 + 現金）と、先月との差。',
+          '稼働回数・勝率・時給・ゲーム数。',
+          '一番勝った／負けた機種と日、月初から月末までの貯メダルの増減、期待値との差。',
+        ],
+      },
+      {
+        h: '開き方',
+        items: [
+          '月が変わると、ホームに「○月のふり返りができました」と出ます。「見る」で開き、✕ で閉じると次の月まで出ません。',
+          '「履歴」の一覧の「○月のふり返りを見る」から、どの月でも開けます。上の ‹ › で月を切り替えられます。',
+        ],
+      },
+      { h: 'もっと詳しくするには', p: '記録の「詳しく入力」で機種名・開始時刻・終了時刻・期待値を入れると、機種や時給が出るようになります。' },
+    ],
+  },
+
   counter: {
     title: '小役カウンターの使い方',
     sections: [
@@ -293,5 +315,6 @@ export const GUIDES = {
 export function guideKeyFor(route) {
   if (route.name === 'history') return { charts: 'charts', diagnosis: 'diagnosis', forecast: 'forecast' }[route.id] ?? 'history';
   if (route.name === 'store') return 'stores';
+  if (route.name === 'review') return 'review';
   return GUIDES[route.name] ? route.name : 'home';
 }
