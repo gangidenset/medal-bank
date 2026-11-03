@@ -84,7 +84,9 @@ test('遊びすぎ防止：月の負けの上限に達するとホームでお�
 
   await page.evaluate(() => { location.hash = '#/judge'; });
   await page.getByLabel('現在G数（データカウンターの総G数）').fill('3000');
+  await page.getByTestId('open-counter').click();
   for (let i = 0; i < 16; i++) await page.getByRole('button', { name: 'BIGを数える' }).click();
+  await page.getByTestId('to-judge').click();
   await expect(page.getByTestId('verdict-label')).toHaveText('ヤメ推奨');
   await expect(page.getByTestId('verdict')).toContainText('月の上限');
 });

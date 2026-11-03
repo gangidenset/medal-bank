@@ -38,12 +38,15 @@ test('機種タイプ・ゲーム数を記録でき、ジャグラーは機種�
   expect(t.detail.games).toBe(3200);
 });
 
-test('実戦カウンター：タップで数え、設定の可能性と続行・ヤメを表示。閉じても残る', async ({ page }) => {
+test('続行・ヤメ判断：小役カウンターで数えた回数から、設定の可能性と続行・ヤメを表示。閉じても残る', async ({ page }) => {
   await openApp(page, { data: { stores: [A], settings: { lastStoreId: 'a' } }, now: new Date('2026-10-20T15:00:00+09:00') });
   await page.getByTestId('judge-button').click();
   await expect(page.getByRole('heading', { name: '続行・ヤメ判断', exact: true })).toBeVisible();
   await expect(page.getByTestId('jd-stock')).toHaveText('2,800枚');
-  await page.getByLabel('現在G数（データカウンターの総G数）').fill('3000');
+  // 判断画面では数えない（数えるのは全画面の小役カウンター）
+  await expect(page.getByRole('button', { name: 'BIGを数える' })).toHaveCount(0);
+  await page.getByTestId('open-counter').click();
+  await page.getByLabel('現在G数').fill('3000');
   const plus = async (name, times) => {
     for (let i = 0; i < times; i++) await page.getByRole('button', { name: `${name}を数える` }).click();
   };
@@ -59,6 +62,9 @@ test('実戦カウンター：タップで数え、設定の可能性と続行�
   await page.getByRole('button', { name: '−モード' }).click();
   await page.getByRole('button', { name: 'BIGを数える' }).click();
   await expect(page.getByTestId('count-bb')).toHaveText('16');
+  await page.getByTestId('to-judge').click();
+  await expect(page.getByTestId('count-bb')).toHaveText('16');
+  await expect(page.getByTestId('count-rb')).toHaveText('18');
   // ブドウは数えていない（0回）ので推測には使わないが、ボタンは出ている
   await expect(page.getByTestId('count-grape')).toHaveText('0');
   await expect(page.getByTestId('jd-high-mini')).toHaveText(/\d+%/);
@@ -111,12 +117,16 @@ test('機種スペックを追加すると、その機種で設定推測でき�
 test('REG の内訳を数え始めても、それまでの REG は消えない', async ({ page }) => {
   await openApp(page, { data: { stores: [A] }, hash: '#/judge' });
   await page.getByLabel('現在G数（データカウンターの総G数）').fill('1000');
+  await page.getByTestId('open-counter').click();
   for (let i = 0; i < 3; i++) await page.getByRole('button', { name: 'REGを数える' }).click();
+  await page.getByTestId('to-judge').click();
   await page.getByText('数える項目（BIG・REGの内訳・ブドウ・チェリー）').click();
   page.once('dialog', (d) => d.accept());
   await page.getByText('REG を単独・チェリー重複に分けて数える').click();
   await expect(page.getByTestId('count-rbSolo')).toHaveText('3');
+  await page.getByTestId('open-counter').click();
   await page.getByRole('button', { name: 'チェリーREGを数える' }).click();
+  await page.getByTestId('to-judge').click();
   await page.getByText('REG を単独・チェリー重複に分けて数える').click();
   await expect(page.getByTestId('count-rb')).toHaveText('4');
 });
@@ -125,12 +135,16 @@ test('チェリーBIG：BIG を単独・チェリー重複に分けて数えら�
   await openApp(page, { data: { stores: [A] }, hash: '#/judge' });
   await page.getByLabel('機種', { exact: true }).selectOption('my5');
   await page.getByLabel('現在G数（データカウンターの総G数）').fill('2000');
+  await page.getByTestId('open-counter').click();
   for (let i = 0; i < 4; i++) await page.getByRole('button', { name: 'BIGを数える' }).click();
+  await page.getByTestId('to-judge').click();
   await page.getByText('数える項目（BIG・REGの内訳・ブドウ・チェリー）').click();
   page.once('dialog', (d) => d.accept());
   await page.getByText('BIG を単独・チェリー重複に分けて数える').click();
   await expect(page.getByTestId('count-bbSolo')).toHaveText('4');
+  await page.getByTestId('open-counter').click();
   await page.getByRole('button', { name: 'チェリーBIGを数える' }).click();
+  await page.getByTestId('to-judge').click();
   await expect(page.getByTestId('count-bbCherry')).toHaveText('1');
   await expect(page.getByTestId('jd-combined')).toHaveText('1/400.0');
   await page.getByRole('button', { name: 'この台の結果を記録する' }).click();

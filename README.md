@@ -1,16 +1,19 @@
 # メダルバンク
 
-「スロットの貯メダルを、自分の資産として管理する」スマートフォン向けアプリ（PWA）。
+「スロットの貯メダルを、自分の資産として管理する」スマートフォン向けアプリ（PWA ／ Android アプリ）。
+
+**Android アプリ（APK）**：https://github.com/gangidenset/medal-bank/releases/latest から `medal-bank.apk` をダウンロードしてインストール（[入れ方](#android-アプリapk)）。
 
 - 開く → 「今日の記録」 → 店舗（前回の店舗が選択済み）→ `+1,000` などをタップ → 保存、の数秒で記録できる
 - 総貯メダル・換金価値（店舗ごとの交換枚数で円換算）・今月の増減と収支をホームに大きく表示
 - 端末内（IndexedDB）に保存。ホーム画面に追加すれば、電波のない店内でも使える
 - **立ち回り診断**（履歴 → 診断）：勝率・平均収支・平均時給と、機種タイプ・機種・曜日・打ち始めの時間帯・店舗ごとの成績、「あなたはスマスロよりAタイプの方が明らかに成績が良いです」などのコメント
 - **時給計算**：開始・終了時刻・ゲーム数・期待値を記録し、機種・機種タイプごとの時給まで集計
-- **実戦カウンター**（ホーム →「実戦カウンター・ヤメ判断」）：大きな色つきボタンで BIG・REG（それぞれ単独/チェリー重複に分けられる）・ブドウ・チェリーを数え（−モード・1つ戻す付き）、設定1〜6の可能性・「設定4以上の可能性」と、🟢続行推奨 / 🟡様子見 / 🔴ヤメ推奨・推奨ヤメライン・最大追加投資・現在期待値を表示
-- **横向き**：スマホを横にすると、薄いナビとボタン1列の実戦カウンターに切り替わる。Android は実戦カウンターの「横向き」ボタンで横に固定できる（iPhone はウェブから向きを固定できないため、画面の向きのロックを解除して横にする）
+- **続行・ヤメ判断**（ホーム →「実戦カウンター・ヤメ判断」）：全画面の小役カウンターで数えた BIG・REG（それぞれ単独/チェリー重複に分けられる）・ブドウ・チェリーの回数から、設定1〜6の可能性・「設定4以上の可能性」と、🟢続行推奨 / 🟡様子見 / 🔴ヤメ推奨・推奨ヤメライン・最大追加投資・現在期待値を表示
+- **横向き**：スマホを横にすると、薄いナビとボタン1列の小役カウンターに切り替わる。Android は小役カウンターの「横向き」ボタンで横に固定できる（iPhone はウェブから向きを固定できないため、画面の向きのロックを解除して横にする）
 - **全画面の小役カウンター**（ホーム →「小役カウンター」、またはアイコン長押しのショートカット）：スクロールせず、数えるボタンだけを画面いっぱいに表示。開いている間は画面が消えない（Screen Wake Lock 対応端末）
 - **使い方ガイド**：各画面の右上の「？」で、その画面の使い方を表示（初めて行く店舗＝現金スタートの記録手順も）。設定画面から全ガイドの一覧も開ける
+- **電卓**：記録画面の増減枚数・保存後の残高の横の 🧮 で、足し算・引き算・掛け算・割り算をして入力できる（残高では「今の残高」から計算できる）
 - **残高で入力**：記録画面で「残高で入力」に切り替え、レシートや台の表示の残高を入れると、今の残高との差を増減として記録
 - **小役カウンター → 記録**：「この台の結果を記録する」で、数え始めた時刻・G数・機種・推定した設定（設定4以上の可能性）を記録に引き継ぐ。診断に「実戦カウンターの推定別」の成績
 - **再プレイの上限・手数料**：店舗ごとに登録し、店舗カードと続行・ヤメ判断（最大追加投資）に反映
@@ -68,10 +71,11 @@ www/                    アプリ本体（GitHub Pages・Capacitor の公開フ�
   js/machines.js        機種スペック（組み込みは BIG・REG・機械割のみ）
   manifest.json         PWA の設定（standalone 表示・アイコン）
   service-worker.js     オフライン対応
-  icons/                アプリアイコン（scripts/make_icons.py で生成）
+  icons/                アプリアイコン（assets/icon-source.png から scripts/make_icons.py で生成）
 tests/                  単体テスト（node --test）
 e2e/                    画面操作テスト（Playwright）
 capacitor.config.json   ネイティブアプリ化の設定（webDir: www）
+assets/                 Android アプリのアイコン・起動画面の元画像
 ```
 
 指示書の例ではファイルをリポジトリ直下に置いていたが、Capacitor でネイティブアプリにするときに `node_modules` などを含めずに `www/` だけを取り込めるよう、アプリ本体は `www/` にまとめた。
@@ -99,18 +103,34 @@ settings      theme, targetMedals, roundingMethod, lastStoreId, recordDetailOpen
 
 ## 将来の拡張
 
-### ネイティブアプリ（Android / iOS）
+### Android アプリ（APK）
 
-画面遷移は `#` によるハッシュ方式、パスはすべて相対、外部 CDN なしなので、`www/` をそのまま Capacitor に載せられる。
+push すると GitHub Actions（`.github/workflows/android.yml`）が Capacitor で APK を作り、Releases の「最新版」に `medal-bank.apk` を置く。
 
-```bash
-npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/ios
-npx cap add android
-npx cap add ios
-npx cap sync
-```
+**スマホへの入れ方**
 
-`capacitor.config.json` の `appId` は公開前に自分のドメインに合わせて変える。ネイティブ版ではサービスワーカーを登録しない（`app.js`）。保存先を SQLite などにしたい場合は `storage.js` に同じインターフェースのアダプタを追加する。
+1. スマホのブラウザで https://github.com/gangidenset/medal-bank/releases/latest を開く
+2. 「Assets」の `medal-bank.apk` をタップしてダウンロード
+3. ダウンロードしたファイルを開く →「この提供元のアプリを許可」をオンにして「インストール」
+4. 新しい版は同じ手順で上書きインストールすれば、データはそのまま残る
+
+Actions の画面の「Run workflow」から手動でビルドもできる。
+
+**しくみ**
+
+- `npx cap add android` → `npx capacitor-assets generate --android`（`assets/` のアイコン・起動画面から各解像度を生成）→ `assembleRelease` → `apksigner` で署名。
+- `android/` フォルダは毎回 CI で作るのでリポジトリには入れない。`assets/` のアイコン・起動画面は `npm run icons` で `assets/icon-source.png` から作る。
+- 署名鍵：Secrets（Settings → Secrets and variables → Actions）の `ANDROID_KEYSTORE_BASE64`（PKCS12 の鍵ファイルを base64 にしたもの・別名 `medalbank`）と `ANDROID_KEYSTORE_PASSWORD` で署名する。未設定ならビルドごとに使い捨ての鍵で署名するので、インストールはできるが次の版を上書きインストールできない（一度アンインストールが必要で、データも消えるので先に JSON バックアップを取る）。鍵は次のように作る：
+  ```bash
+  keytool -genkeypair -storetype PKCS12 -keystore medalbank.p12 -alias medalbank -keyalg RSA -keysize 2048 -validity 36500 -dname "CN=Medal Bank"
+  base64 -w0 medalbank.p12   # これを ANDROID_KEYSTORE_BASE64 に、決めたパスワードを ANDROID_KEYSTORE_PASSWORD に登録
+  ```
+  鍵ファイルはリポジトリに入れない（`.gitignore` 済み）。なくすと上書きインストールできなくなるので、手元に保管する。
+- `versionCode` は Actions の実行番号、`versionName` は `package.json` の `version`。
+- アプリの中ではダウンロードが使えないので、JSON / CSV の保存は `@capacitor/filesystem` で一時保存して `@capacitor/share` の共有シート（Google ドライブ・ファイル など）に渡す（`app.js` の `download`）。
+- ネイティブ版ではサービスワーカーを登録しない（`app.js`）。データは WebView の IndexedDB に保存される（ブラウザ版とは別の保存場所なので、移すときは JSON バックアップ → 復元）。
+
+iOS は `npm install @capacitor/ios && npx cap add ios` で Xcode プロジェクトを作れる（ビルドには Mac が必要）。保存先を SQLite などにしたい場合は `storage.js` に同じインターフェースのアダプタを追加する。
 
 ### クラウド同期（Firebase / Supabase）
 
@@ -140,4 +160,4 @@ npx cap sync
 
 GitHub にリポジトリを作って `main` に push すると、`.github/workflows/pages.yml` がテストを実行し、通ったら `www/` を公開する（リポジトリの Settings → Pages → Source を「GitHub Actions」にする）。
 
-アイコンを変えるときは `scripts/make_icons.py` を編集して `npm run icons`。アプリのファイルを追加・削除したら `www/service-worker.js` の `SHELL` を更新し、`CACHE` の番号を上げる。
+アイコンを変えるときは `assets/icon-source.png`（1024×1024・背景は端まで塗る）を差し替えて `npm run icons`（Pillow が必要）。PWA と Android アプリの両方のアイコン・起動画面が作り直される。アプリのファイルを追加・削除したら `www/service-worker.js` の `SHELL` を更新し、`CACHE` の番号を上げる。

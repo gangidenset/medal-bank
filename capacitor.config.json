@@ -1,5 +1,8 @@
 {
-  "appId": "com.example.medalbank",
+  "appId": "io.github.gangidenset.medalbank",
   "appName": "メダルバンク",
-  "webDir": "www"
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#14161c"
+  }
 }

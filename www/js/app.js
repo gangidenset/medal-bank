@@ -15,6 +15,7 @@ import { barChart, lineChart } from './chart.js';
 import { pendingNotices } from './notify.js';
 import { limit } from './plan.js';
 import * as ui from './ui.js';
+import * as calc from './calc.js';
 
 const VERSION = '1.6.0';
 const STORAGE_LABELS = {
@@ -115,7 +116,7 @@ function newDraft() {
     date: dateStr(now), time: timeStr(now), startTime: '', expectedValue: '', machine: '', machineNumber: '', memo: '',
     machineType: '', games: '', high: '',
     inputMode: data.settings.recordInputMode, balanceAfter: '',
-    detailOpen: data.settings.recordDetailOpen, playMode: false, startMedals: '', endMedals: '',
+    detailOpen: data.settings.recordDetailOpen, startMedals: '', endMedals: '',
   };
   // 実戦カウンターの「この台の結果を記録する」から来たときは、機種・G数などを引き継ぐ
   if (pendingDraft) {
@@ -139,7 +140,7 @@ function draftFromTx(t) {
     machineType: t.machineType ?? '', games: s(d.games), high: s(d.high),
     inputMode: 'diff', balanceAfter: '',
     detailOpen: t.type !== 'exchange' && Boolean(t.machine || t.machineNumber || t.memo || t.cash || d.startMedals != null || d.startTime || d.expectedValue != null || d.games != null),
-    playMode: d.startMedals != null || d.endMedals != null,
+    // 以前の版の「開始時・終了時の貯メダル」は入力欄をなくしたが、編集しても値は残す
     startMedals: s(d.startMedals), endMedals: s(d.endMedals),
   };
 }
@@ -257,6 +258,33 @@ function openGuide(key) {
 function closeGuide() {
   document.getElementById('guide-layer')?.remove();
   document.documentElement.classList.remove('sheet-open');
+}
+
+// ---- 電卓（記録画面の枚数入力） ----
+
+let calcState = null;
+
+function renderCalc() {
+  let el = document.getElementById('calc-layer');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'calc-layer';
+    document.body.append(el);
+    document.documentElement.classList.add('sheet-open');
+  }
+  el.innerHTML = ui.calcSheet(calcState);
+}
+
+/** 式の最後に数を足す（演算子の後ならつなげ、数の後なら置き換える）。 */
+function appendNumber(expr, v) {
+  const n = calc.fromValue(v);
+  return expr === '' || calc.OPS.includes(expr.at(-1)) ? expr + n : n;
+}
+
+function closeCalc() {
+  calcState = null;
+  document.getElementById('calc-layer')?.remove();
+  if (!document.getElementById('guide-layer')) document.documentElement.classList.remove('sheet-open');
 }
 
 // ---- 実戦カウンター ----
@@ -404,6 +432,18 @@ function applyTheme() {
 // ---- 保存・読み込み ----
 
 async function download(filename, content, type) {
+  // Android アプリ（APK）の中ではダウンロードが使えないので、いったん保存してから共有シート（Google ドライブ・ファイルなど）に渡す
+  // （@capacitor/core を読み込まずに使えるよう、ネイティブ側のプラグインを直接呼ぶ）
+  const cap = window.Capacitor;
+  if (cap?.isNativePlatform?.() && cap.nativePromise) {
+    try {
+      const { uri } = await cap.nativePromise('Filesystem', 'writeFile', { path: filename, data: content, directory: 'CACHE', encoding: 'utf8', recursive: true });
+      await cap.nativePromise('Share', 'share', { title: filename, files: [uri], dialogTitle: '保存先を選ぶ' });
+    } catch (e) {
+      if (!/cancel/i.test(String(e?.message))) toast('保存できませんでした。もう一度お試しください。', { error: true });
+    }
+    return;
+  }
   const blob = new Blob([content], { type });
   const file = typeof File === 'function' ? new File([blob], filename, { type }) : null;
   // iPhone のホーム画面アプリではダウンロードが使えないことがあるので、共有シート（「ファイルに保存」）を使う
@@ -501,6 +541,33 @@ const actions = {
   },
   guide: (el) => openGuide(el.dataset.key || guideKeyFor(parseRoute())),
   'guide-close': () => closeGuide(),
+  'calc-open': (el) => {
+    if (!draft) return;
+    const target = el.dataset.target;
+    calcState = { target, expr: calc.fromValue(draft[target]), current: ui.balanceBefore(buildVM(), draft) };
+    renderCalc();
+  },
+  'calc-key': (el) => {
+    if (!calcState) return;
+    const k = el.dataset.k;
+    calcState.expr = k === 'cur' ? appendNumber(calcState.expr, el.dataset.v) : calc.press(calcState.expr, k);
+    navigator.vibrate?.(5);
+    renderCalc();
+  },
+  'calc-close': () => closeCalc(),
+  'calc-apply': () => {
+    if (!calcState || !draft) return;
+    const v = calc.evaluateMedals(calcState.expr);
+    if (v === null) return;
+    if (calcState.target === 'balanceAfter') {
+      if (v < 0) return;
+      draft.balanceAfter = String(v);
+    } else {
+      draft.medals = String(applySign(draft.type, v));
+    }
+    closeCalc();
+    rerenderRecord();
+  },
   'minus-mode': () => {
     judgeState.minusMode = !judgeState.minusMode;
     render();
@@ -562,7 +629,6 @@ const actions = {
   quick: (el) => {
     const n = (Number(draft.medals) || 0) + Number(el.dataset.v);
     draft.medals = String(applySign(draft.type, n));
-    draft.playMode = false;
     rerenderRecord();
   },
   'quick-clear': () => { draft.medals = ''; rerenderRecord(); },
@@ -618,23 +684,14 @@ function updateStorePreview() {
   el.innerHTML = ui.storePreview(document.getElementById('st-medals').value, document.getElementById('st-exchange').value, data.settings.roundingMethod);
 }
 
-const DRAFT_FIELDS = new Set(['medals', 'payout', 'investment', 'date', 'time', 'startTime', 'expectedValue', 'machine', 'machineNumber', 'memo', 'startMedals', 'endMedals', 'games', 'balanceAfter']);
+const DRAFT_FIELDS = new Set(['medals', 'payout', 'investment', 'date', 'time', 'startTime', 'expectedValue', 'machine', 'machineNumber', 'memo', 'games', 'balanceAfter']);
 
 function onInput(e) {
   const t = e.target;
   if (t.form?.id === 'record-form' && draft) {
-    if (t.name === 'playMode') {
-      draft.playMode = t.checked;
-      rerenderRecord();
-      return;
-    }
     if (!DRAFT_FIELDS.has(t.name)) return;
     draft[t.name] = t.value;
     if (t.name === 'machine') updateTypeChips();
-    if ((t.name === 'startMedals' || t.name === 'endMedals') && draft.startMedals !== '' && draft.endMedals !== '') {
-      draft.medals = String(Number(draft.endMedals) - Number(draft.startMedals));
-      document.getElementById('rec-medals').value = draft.medals;
-    }
     const vm = buildVM();
     document.getElementById('rec-preview').innerHTML = ui.recordPreview(vm, draft);
     const work = document.getElementById('rec-work');
@@ -727,8 +784,8 @@ async function saveRecord() {
   const n = (k) => (draft[k] === '' || draft[k] == null ? null : Number(draft[k]));
   const minutes = playMinutes(draft.startTime, draft.time);
   const detail = {
-    startMedals: draft.playMode ? n('startMedals') : null,
-    endMedals: draft.playMode ? n('endMedals') : null,
+    startMedals: n('startMedals'),
+    endMedals: n('endMedals'),
     investment: n('investment'),
     payout: n('payout'),
     expectedValue: n('expectedValue'),
@@ -867,8 +924,18 @@ async function init() {
     // 次回も同じ状態で開く（時給・期待値を毎回入れる人向け）
     if (data.settings.recordDetailOpen !== draft.detailOpen) data.updateSettings({ recordDetailOpen: draft.detailOpen }, { silent: true }).catch(fail);
   }, true);
-  window.addEventListener('hashchange', () => { closeGuide(); render(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeGuide(); });
+  window.addEventListener('hashchange', () => { closeGuide(); closeCalc(); render(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { closeGuide(); closeCalc(); return; }
+    // パソコンのキーボードでも電卓を使えるように
+    if (!calcState) return;
+    const k = { '-': '−', '*': '×', '/': '÷', Backspace: 'back', Enter: '=', Delete: 'C' }[e.key] ?? e.key;
+    if (/^[0-9]$/.test(k) || calc.OPS.includes(k) || ['back', '=', 'C'].includes(k)) {
+      e.preventDefault();
+      calcState.expr = calc.press(calcState.expr, k);
+      renderCalc();
+    }
+  });
   // 戻るジェスチャーなどで全画面（横向き固定）が終わったら、ボタンの表示を戻す
   document.addEventListener('fullscreenchange', () => {
     if (!document.fullscreenElement) screen.orientation?.unlock?.();

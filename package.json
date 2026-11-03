@@ -13,8 +13,16 @@
     "icons": "python scripts/make_icons.py"
   },
   "devDependencies": {
+    "@capacitor/assets": "^4.0.0",
+    "@capacitor/cli": "^8.6.0",
     "@playwright/test": "1.64.0",
     "eslint": "9.39.1",
     "globals": "16.5.0"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/share": "^8.0.3"
   }
 }
