@@ -16,6 +16,7 @@ import { pendingNotices } from './notify.js';
 import { limit } from './plan.js';
 import * as ui from './ui.js';
 import * as calc from './calc.js';
+import { monthlyReview, reviewToNotify } from './review.js';
 
 const VERSION = '1.6.0';
 const STORAGE_LABELS = {
@@ -102,6 +103,7 @@ function buildVM() {
       }),
     },
     machines: { get: () => [...new Set(data.transactions.map((t) => t.machine).filter(Boolean))].slice(0, 30) },
+    reviewMonth: { get: () => reviewToNotify(data.transactions, thisMonth, data.settings.reviewSeenMonth) },
   });
 }
 
@@ -169,6 +171,15 @@ function render() {
       else if (r.id === 'diagnosis') html = ui.diagnosisView(vm, diagState);
       else html = ui.historyView(vm, historyState);
       break;
+    case 'review': {
+      // #/review（月の指定なし）は先月。今月より先・記録より前の月には進めない
+      const month = /^\d{4}-\d{2}$/.test(r.id ?? '') && r.id <= vm.thisMonth ? r.id : addMonths(vm.thisMonth, -1);
+      const first = firstDate(data.stores, data.transactions);
+      html = ui.reviewView(vm, monthlyReview(data.stores, data.transactions, month), { canPrev: Boolean(first) && month > monthOf(first) });
+      tab = 'history';
+      markReviewSeen(month);
+      break;
+    }
     case 'counter':
     case 'judge': {
       if (!data.store(judgeState.storeId)) judgeState.storeId = data.settings.lastStoreId && data.store(data.settings.lastStoreId) ? data.settings.lastStoreId : data.stores[0]?.id ?? null;
@@ -258,6 +269,15 @@ function openGuide(key) {
 function closeGuide() {
   document.getElementById('guide-layer')?.remove();
   document.documentElement.classList.remove('sheet-open');
+}
+
+// ---- 月ごとのふり返り ----
+
+/** ホームの「先月のふり返り」のお知らせは、見たら（閉じたら）出さない */
+function markReviewSeen(month) {
+  if (month < addMonths(monthOf(dateStr(new Date())), -1)) return;
+  if (data.settings.reviewSeenMonth >= month) return;
+  data.updateSettings({ reviewSeenMonth: month }, { silent: true }).catch(fail);
 }
 
 // ---- 電卓（記録画面の枚数入力） ----
@@ -541,6 +561,14 @@ const actions = {
   },
   guide: (el) => openGuide(el.dataset.key || guideKeyFor(parseRoute())),
   'guide-close': () => closeGuide(),
+  'history-month': (el) => {
+    historyState.month = el.dataset.month;
+    go('#/history');
+  },
+  'review-dismiss': (el) => {
+    markReviewSeen(el.dataset.month);
+    el.closest('[data-testid="review-card"]')?.remove();
+  },
   'calc-open': (el) => {
     if (!draft) return;
     const target = el.dataset.target;

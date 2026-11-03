@@ -10,7 +10,7 @@ test('どの画面にも右上に「？」があり、その画面のガイド�
     ['#/home', 'ホームの使い方'], ['#/record', '記録の使い方'], ['#/history', '履歴の使い方'],
     ['#/history/charts', 'グラフの使い方'], ['#/history/diagnosis', '立ち回り診断の使い方'], ['#/history/forecast', '予測・目標の使い方'],
     ['#/stores', '店舗の使い方'], ['#/store/a', '店舗の使い方'], ['#/settings', '設定の使い方'],
-    ['#/judge', '続行・ヤメ判断の使い方'], ['#/counter', '小役カウンターの使い方'], ['#/spec/im-ex', 'スペックの入力のしかた'],
+    ['#/review/2026-10', 'ふり返りの使い方'], ['#/judge', '続行・ヤメ判断の使い方'], ['#/counter', '小役カウンターの使い方'], ['#/spec/im-ex', 'スペックの入力のしかた'],
   ];
   for (const [hash, title] of cases) {
     await page.evaluate((h) => { location.hash = h; }, hash);

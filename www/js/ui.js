@@ -1,6 +1,6 @@
 // 画面の描画（HTML 文字列を返すだけ）。データの変更やイベント処理は app.js が担当する。
 
-import { TX_TYPES, applySign, medalsToYen, perHour, playMinutes, roundYen, txProfit, typeLabel, yenPerMedal } from './calculation.js';
+import { TX_TYPES, addMonths, applySign, medalsToYen, perHour, playMinutes, roundYen, txProfit, typeLabel, yenPerMedal } from './calculation.js';
 import { can, limit, planLabel } from './plan.js';
 import { MACHINE_TYPES, guessMachineType } from './analysis.js';
 import { evaluateMedals, formatExpr } from './calc.js';
@@ -216,6 +216,11 @@ export function homeView(vm) {
           <div class="tile-sub">うち現金 ${signed(month.cash)}円</div>
         </div>
       </div>
+      ${vm.reviewMonth ? `
+        <div class="review-card" data-testid="review-card">
+          <a href="#/review/${vm.reviewMonth}" data-testid="review-open"><span aria-hidden="true">📅</span><span><strong>${Number(vm.reviewMonth.slice(5, 7))}月のふり返り</strong>ができました</span><span class="review-go">見る ›</span></a>
+          <button type="button" class="icon-btn" data-action="review-dismiss" data-month="${vm.reviewMonth}" aria-label="ふり返りのお知らせを閉じる">✕</button>
+        </div>` : ''}
       <a class="btn-record" href="#/record" data-testid="record-button">${icon('record')}今日の記録</a>
       ${can('judge') ? `
         <div class="sub-row">
@@ -435,6 +440,7 @@ export function historyView(vm, st) {
         <div class="tile"><div class="tile-label">増減</div><div class="tile-val ${tone(sum.medals)}" data-testid="history-medals">${signed(sum.medals)}<small>枚</small></div><div class="tile-sub">${signedYen(roundYen(sum.medalYen, method))}相当</div></div>
         <div class="tile"><div class="tile-label">収支</div><div class="tile-val ${tone(roundYen(sum.profit, method))}" data-testid="history-profit">${signed(roundYen(sum.profit, method))}<small>円</small></div><div class="tile-sub">現金 ${signed(sum.cash)}円・${sum.count}件</div></div>
       </div>
+      ${list.length ? `<a class="btn-sub review-link" href="#/review/${st.month}" data-testid="review-link">📅 ${Number(st.month.slice(5, 7))}月のふり返りを見る</a>` : ''}
       ${workCard(vm.work(list), method)}
       ${groups.length ? groups.map((g) => {
         const day = vm.summarize(g.items);
@@ -763,6 +769,58 @@ export function judgeResult(vm, js) {
     <p class="disclaimer">※ スペックと数えた回数からの推定で、結果を保証するものではありません。1時間に約750G・ボーナスなしで1Gあたり約1.5枚として計算しています。</p>
     <button class="btn" type="button" data-action="judge-record">この台の結果を記録する</button>`;
 }
+
+// ---- 月ごとのふり返り ----
+
+export function reviewView(vm, r, { canPrev }) {
+  const { method } = vm;
+  const m = Number(r.month.slice(5, 7));
+  const y = (v) => `${signed(roundYen(v, method))}円`;
+  const nav = `
+      <div class="month-nav">
+        <a class="icon-btn" href="#/review/${addMonths(r.month, -1)}" aria-label="前の月"${canPrev ? '' : ' aria-disabled="true" tabindex="-1" data-off="1"'}>${icon('back')}</a>
+        <strong data-testid="review-month">${monthLabel(r.month)}のふり返り</strong>
+        <a class="icon-btn flip" href="#/review/${addMonths(r.month, 1)}" aria-label="次の月"${r.month < vm.thisMonth ? '' : ' aria-disabled="true" tabindex="-1" data-off="1"'}>${icon('back')}</a>
+      </div>`;
+  if (!r.has) {
+    return `${topbar('ふり返り', { back: '#/history' })}<div class="content">${nav}
+      <div class="card"><p class="muted">${m}月の記録はありません。</p></div></div>`;
+  }
+  const item = (label, body, id) => `<div class="rv-row"${id ? ` data-testid="${id}"` : ''}><span>${label}</span><div>${body}</div></div>`;
+  const machine = (g) => `<strong>${esc(g.label)}</strong><small class="${tone(g.profit)}">${y(g.profit)}（${g.count}回）</small>`;
+  const day = (d) => `<strong>${dayLabel(d.date)}</strong><small class="${tone(d.profit)}">${y(d.profit)}</small>`;
+  const medalDiff = r.endMedals - r.startMedals;
+  return `
+    ${topbar('ふり返り', { back: '#/history' })}
+    <div class="content">
+      ${nav}
+      <div class="hero rv-hero">
+        <div class="hero-label">${m}月の収支</div>
+        <div class="hero-num" data-testid="review-profit">${signed(roundYen(r.profit, method))}<small>円</small></div>
+        <div class="hero-yen">${r.prevProfit == null ? '先月の記録なし' : `先月 ${y(r.prevProfit)}`}・貯メダル ${signed(r.medals)}枚・現金 ${signed(r.cash)}円</div>
+      </div>
+      ${r.comments.length ? `<ul class="insights" data-testid="review-comments">${r.comments.map((c) => `<li class="${c.tone}"><strong>${esc(c.text)}</strong></li>`).join('')}</ul>` : ''}
+      <div class="card">
+        <div class="stat-grid">
+          <div><span>稼働</span><strong data-testid="review-sessions">${r.sessions}回</strong><small>${r.playDays}日</small></div>
+          <div><span>勝率</span><strong data-testid="review-winrate">${r.sessions ? `${Math.round(r.winRate)}%` : '−'}</strong><small>${r.wins}勝${r.losses}敗</small></div>
+          <div><span>時給</span><strong data-testid="review-hourly">${r.hourly == null ? '−' : `<span class="${tone(r.hourly)}">${y(r.hourly)}</span>`}</strong><small>${r.minutes ? `稼働 ${duration(r.minutes)}` : '時刻を入れると表示'}</small></div>
+          <div><span>ゲーム数</span><strong>${r.games ? `${num(r.games)}G` : '−'}</strong><small>&nbsp;</small></div>
+        </div>
+      </div>
+      <div class="card rv-list">
+        ${item('🏆 一番勝った機種', r.bestMachine ? machine(r.bestMachine) : '<span class="muted">−</span>', 'review-best-machine')}
+        ${item('💧 一番負けた機種', r.worstMachine ? machine(r.worstMachine) : '<span class="muted">−</span>', 'review-worst-machine')}
+        ${item('📈 一番勝った日', r.bestDay ? day(r.bestDay) : '<span class="muted">−</span>', 'review-best-day')}
+        ${item('📉 一番負けた日', r.worstDay ? day(r.worstDay) : '<span class="muted">−</span>', 'review-worst-day')}
+        ${item('🪙 貯メダル', `<strong>${num(r.startMedals)} → ${num(r.endMedals)}枚</strong><small class="${tone(medalDiff)}">${signed(medalDiff)}枚</small>`, 'review-medals')}
+        ${r.ev ? item('🎯 期待値との差', `<strong class="${tone(r.ev.diff)}">${y(r.ev.diff)}</strong><small>期待値 ${y(r.ev.sum)}（${r.ev.count}回）</small>`) : ''}
+      </div>
+      <button type="button" class="btn" data-action="history-month" data-month="${r.month}">${m}月の記録の一覧を見る</button>
+      <p class="disclaimer">※ 機種・時給は理由が「遊技結果」の記録から集計します。機種名・開始/終了時刻を入れると詳しく出ます。</p>
+    </div>`;
+}
+
 
 // ---- 機種スペックの編集 ----
 

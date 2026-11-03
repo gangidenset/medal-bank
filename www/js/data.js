@@ -23,6 +23,7 @@ export const DEFAULT_SETTINGS = {
   recordInputMode: 'diff', // 記録の入力方法：diff（増減）| balance（保存後の残高）
   monthlyLossLimit: 0, // 遊びすぎ防止：月の負けの上限（円、0 = 決めていない）
   weeklyHoursLimit: 0, // 遊びすぎ防止：1週間の稼働時間の目安（時間、0 = 決めていない）
+  reviewSeenMonth: '', // 月ごとのふり返り：ホームのお知らせを見た（閉じた）月 'YYYY-MM'
 };
 
 export class ValidationError extends Error {}
@@ -151,6 +152,7 @@ function normalizeSettings(input = {}) {
   if (/^\d{2}:\d{2}$/.test(input.closingTime ?? '')) s.closingTime = input.closingTime;
   if (['normal', 'event', 'flat'].includes(input.judgePrior)) s.judgePrior = input.judgePrior;
   if (['diff', 'balance'].includes(input.recordInputMode)) s.recordInputMode = input.recordInputMode;
+  if (/^\d{4}-\d{2}$/.test(input.reviewSeenMonth ?? '')) s.reviewSeenMonth = input.reviewSeenMonth;
   const mLoss = int(input.monthlyLossLimit);
   if (Number.isFinite(mLoss) && mLoss >= 0 && mLoss <= MAX_YEN) s.monthlyLossLimit = mLoss;
   const wHours = Number(input.weeklyHoursLimit);
