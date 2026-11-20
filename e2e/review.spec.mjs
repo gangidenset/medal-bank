@@ -45,6 +45,8 @@ test('✕ で閉じると出ない。履歴からはいつでも開ける', asyn
   await openApp(page, { data, now: new Date('2026-10-02T12:00:00+09:00') });
   await page.getByRole('button', { name: 'ふり返りのお知らせを閉じる' }).click();
   await expect(page.getByTestId('review-card')).toHaveCount(0);
+  // 閉じた記録は端末内に非同期で保存されるので、保存されてから読み込み直す
+  await expect.poll(async () => (await stored(page, 'meta')).find((m) => m.id === 'settings')?.reviewSeenMonth).toBe('2026-09');
   await page.reload();
   await expect(page.locator('#main > *').first()).toBeVisible();
   await expect(page.getByTestId('review-card')).toHaveCount(0);
