@@ -291,8 +291,16 @@ function renderCalc() {
     el.id = 'calc-layer';
     document.body.append(el);
     document.documentElement.classList.add('sheet-open');
+    el.innerHTML = ui.calcSheet(calcState);
+    return;
   }
-  el.innerHTML = ui.calcSheet(calcState);
+  // 開いている間はシート自体を作り直さない（作り直すと出現アニメーションが毎回走ってしまう）
+  const tpl = document.createElement('template');
+  tpl.innerHTML = ui.calcSheet(calcState);
+  const next = tpl.content.querySelector('.calc-body');
+  const cur = el.querySelector('.calc-body');
+  if (next && cur) cur.replaceWith(next);
+  else el.innerHTML = tpl.innerHTML;
 }
 
 /** 式の最後に数を足す（演算子の後ならつなげ、数の後なら置き換える）。 */
