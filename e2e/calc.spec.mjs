@@ -49,3 +49,13 @@ test('残高はマイナスにできない・0 で割る式は入れられない
   await keys(page, ['C', '5', '÷', '0']);
   await expect(page.getByRole('button', { name: 'この値を入れる' })).toBeDisabled();
 });
+
+test('入力中はシートを作り直さない（出現アニメーションが毎回走らない）', async ({ page }) => {
+  await openApp(page, { data: { stores: [A] }, hash: '#/record' });
+  await page.getByTestId('calc-open-medals').click();
+  await page.getByTestId('calc').evaluate((el) => { el.dataset.mark = '1'; });
+  await keys(page, ['1', '2', '+', '3']);
+  await expect(page.getByTestId('calc-result')).toHaveText('= 15枚');
+  await expect(page.getByTestId('calc')).toHaveAttribute('data-mark', '1');
+  await expect(page.locator('.sheet-backdrop')).toHaveCount(1);
+});
